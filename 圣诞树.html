@@ -1,0 +1,850 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>圣诞树 · Merry Christmas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --gold: #d4af37;
+      --cream: #fceea7;
+      background: #000000;
+      color: var(--cream);
+      font-family: "Times New Roman", Times, serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; }
+    #stage, #controls, #loader { position: fixed; inset: 0; }
+    #stage canvas { display: block; width: 100%; height: 100%; }
+    #controls { pointer-events: none; transition: opacity .35s ease; }
+    #controls.ui-hidden { opacity: 0; pointer-events: none; }
+    #controls.ui-hidden button { pointer-events: none; }
+    .masthead {
+      position: absolute;
+      top: max(25px, env(safe-area-inset-top));
+      left: 12px;
+      right: 12px;
+      text-align: center;
+    }
+    h1 {
+      margin: 0;
+      font: 500 56px/1.12 "Cinzel", Georgia, serif;
+      letter-spacing: .035em;
+      background: linear-gradient(180deg, #fff 7%, #fceea7 59%, #d4af37 98%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 0 18px rgba(212, 175, 55, .43));
+    }
+    .heading-rule {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 11px;
+      margin-top: 8px;
+      color: var(--gold);
+      font-size: 14px;
+    }
+    .heading-rule::before, .heading-rule::after {
+      content: "";
+      width: 50px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #d4af3780);
+    }
+    .heading-rule::after { transform: rotate(180deg); }
+    .scene-controls {
+      position: absolute;
+      bottom: max(20px, env(safe-area-inset-bottom));
+      left: 12px;
+      right: 12px;
+      display: grid;
+      justify-items: center;
+      gap: 10px;
+      text-align: center;
+    }
+    .upload-wrapper { display: grid; justify-items: center; gap: 6px; }
+    button {
+      pointer-events: auto;
+      appearance: none;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:focus-visible { outline: 2px solid var(--cream); outline-offset: 4px; }
+    #upload-button {
+      padding: 11px 18px;
+      border: 1px solid #d4af37ad;
+      border-radius: 3px;
+      background: #26201175;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      font: 600 14px/1.2 "Cinzel", Georgia, serif;
+      letter-spacing: .095em;
+      box-shadow: inset 0 0 15px #d4af3710, 0 0 20px #d4af371d;
+    }
+    #upload-button:hover { background: #51401d90; }
+    #hide-hint, #status { margin: 0; font-size: 13px; color: #e4d8b5; }
+    .mode-controls {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid #d4af374b;
+      border-radius: 5px;
+      background: #090806da;
+    }
+    .mode-controls button {
+      border: 1px solid transparent;
+      border-radius: 3px;
+      padding: 6px 10px;
+      background: transparent;
+      font-size: 14px;
+      color: #dbcead;
+    }
+    .mode-controls button:hover, .mode-controls button[aria-pressed="true"] {
+      color: var(--cream);
+      background: #d4af3727;
+      border-color: #d4af375c;
+    }
+    .mode-controls button:disabled { opacity: .65; cursor: progress; }
+    #status { position: absolute; bottom: calc(100% + 8px); }
+    #webcam {
+      position: fixed;
+      right: 0;
+      bottom: 0;
+      opacity: 0;
+      pointer-events: none;
+      display: grid;
+    }
+    #webcam video, #webcam canvas { width: 160px; height: 120px; }
+    #loader {
+      z-index: 2;
+      display: grid;
+      place-content: center;
+      justify-items: center;
+      gap: 18px;
+      padding: 20px;
+      text-align: center;
+      background: #000000;
+      font: 500 14px/1.6 "Cinzel", Georgia, serif;
+      letter-spacing: .16em;
+      transition: opacity .8s ease, visibility .8s;
+    }
+    #loader.loaded { opacity: 0; visibility: hidden; pointer-events: none; }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 1px solid #d4af372e;
+      border-top: 1px solid #d4af37;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 600px), (max-height: 660px) {
+      .masthead { top: max(14px, env(safe-area-inset-top)); }
+      h1 { font-size: clamp(28px, 7.1vw, 46px); }
+      .scene-controls { gap: 6px; bottom: max(10px, env(safe-area-inset-bottom)); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #loader, #controls { transition-duration: .01s; }
+      .spinner { animation-duration: 3s; }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+        "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm"
+      }
+    }
+  </script>
+</head>
+<body>
+  <main id="stage" aria-label="Interactive 3D Christmas tree"></main>
+  <div id="controls">
+    <header class="masthead">
+      <h1>Merry Christmas</h1>
+      <div class="heading-rule" aria-hidden="true">✧</div>
+    </header>
+    <section class="scene-controls" aria-label="Scene controls">
+      <p id="status" role="status" hidden></p>
+      <div class="upload-wrapper">
+        <button type="button" id="upload-button">ADD MEMORIES</button>
+        <input id="photo-input" type="file" accept="image/*" multiple hidden>
+        <p id="hide-hint">Press 'H' to Hide Controls</p>
+      </div>
+      <div class="mode-controls" role="group" aria-label="Display mode and camera">
+        <button type="button" data-mode="TREE" aria-pressed="true" title="Fist · 1">Tree</button>
+        <button type="button" data-mode="SCATTER" aria-pressed="false" title="Open hand · 2">Scatter</button>
+        <button type="button" data-mode="FOCUS" aria-pressed="false" title="Pinch · 3">Focus</button>
+        <button type="button" id="camera-button" aria-pressed="false" title="Enable hand gestures">Enable camera</button>
+      </div>
+    </section>
+  </div>
+  <div id="webcam" aria-hidden="true">
+    <video id="video" muted autoplay playsinline></video>
+    <canvas id="vision-frame" width="160" height="120"></canvas>
+  </div>
+  <div id="loader" role="status">
+    <div class="spinner" aria-hidden="true"></div>
+    <div id="loader-message">LOADING HOLIDAY MAGIC</div>
+  </div>
+  <noscript><style>.spinner, #loader-message { display: none; }</style>
+    <div id="loader">Enable JavaScript to see the Christmas tree.</div>
+  </noscript>
+
+  <script type="module">
+    const loader = document.querySelector("#loader");
+
+    async function init() {
+      const [
+        THREE, { RoomEnvironment }, { EffectComposer }, { RenderPass },
+        { UnrealBloomPass }, { OutputPass }
+      ] = await Promise.all([
+        import("three"),
+        import("three/addons/environments/RoomEnvironment.js"),
+        import("three/addons/postprocessing/EffectComposer.js"),
+        import("three/addons/postprocessing/RenderPass.js"),
+        import("three/addons/postprocessing/UnrealBloomPass.js"),
+        import("three/addons/postprocessing/OutputPass.js")
+      ]);
+
+      const MODES = Object.freeze({ TREE: "TREE", SCATTER: "SCATTER", FOCUS: "FOCUS" });
+      const STATE = {
+        mode: MODES.TREE,
+        focus: null,
+        gesture: { name: null, x: .5, y: .5, detected: false }
+      };
+      window.STATE = STATE;
+
+      const stage = document.querySelector("#stage");
+      const controls = document.querySelector("#controls");
+      const status = document.querySelector("#status");
+      const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
+      const cameraButton = document.querySelector("#camera-button");
+      const video = document.querySelector("#video");
+      const visionFrame = document.querySelector("#vision-frame");
+      const visionContext = visionFrame.getContext("2d");
+      const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+      const TAU = Math.PI * 2;
+      const TREE_HEIGHT = 18.9;
+      const TREE_BASE = -6.9;
+      const MAX_RADIUS = 8.4;
+      const MAIN_COUNT = 1500;
+      const DUST_COUNT = 2500;
+      const rand = THREE.MathUtils.randFloat;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000000);
+      const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 150);
+      camera.position.set(0, 2, 50);
+      camera.lookAt(0, 2, 0);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.toneMapping = THREE.ReinhardToneMapping;
+      renderer.toneMappingExposure = 2.2;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      stage.appendChild(renderer.domElement);
+
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      const room = new RoomEnvironment();
+      scene.environment = pmrem.fromScene(room, .04).texture;
+      room.dispose();
+      pmrem.dispose();
+
+      const composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      composer.addPass(new UnrealBloomPass(
+        new THREE.Vector2(innerWidth, innerHeight), .45, .4, .7
+      ));
+      composer.addPass(new OutputPass());
+
+      const mainGroup = new THREE.Group();
+      scene.add(mainGroup, new THREE.AmbientLight(0xffffff, .6));
+      const innerLight = new THREE.PointLight(0xff8b34, 2);
+      innerLight.position.set(0, 2, 0);
+      mainGroup.add(innerLight);
+
+      for (const [color, intensity, x, y, z] of [
+        [0xffd17a, 1200, 30, 40, 40],
+        [0x789aff, 600, -30, 20, -30]
+      ]) {
+        const light = new THREE.SpotLight(color, intensity, 0, .65, .45);
+        light.position.set(x, y, z);
+        scene.add(light, light.target);
+      }
+
+      function treePosition(t, angle, thickness = 1) {
+        const radius = MAX_RADIUS * (1 - t) * thickness;
+        return new THREE.Vector3(
+          Math.cos(angle) * radius, TREE_BASE + t * TREE_HEIGHT, Math.sin(angle) * radius
+        );
+      }
+
+      function randomShellPoint() {
+        const y = rand(-1, 1);
+        const angle = rand(0, TAU);
+        const horizontal = Math.sqrt(1 - y * y);
+        const radius = Math.cbrt(rand(8 ** 3, 20 ** 3));
+        return new THREE.Vector3(
+          horizontal * Math.cos(angle), y, horizontal * Math.sin(angle)
+        ).multiplyScalar(radius);
+      }
+
+      const particles = [];
+      const photos = [];
+      const matrix = new THREE.Object3D();
+      const positionTarget = new THREE.Vector3();
+      const cameraFront = new THREE.Vector3(0, 2, 35);
+      const inverseRoot = new THREE.Quaternion();
+      const focusRotation = new THREE.Quaternion();
+      const focusPosition = new THREE.Vector3();
+
+      class Particle {
+        constructor(type, tree, size, batch = null, slot = 0, object = null) {
+          this.type = type;
+          this.tree = tree;
+          this.scatter = randomShellPoint();
+          // Leave an opening in front of the background for the focused frame.
+          this.background = this.scatter.clone().multiplyScalar(1.22);
+          this.background.z -= 13;
+          this.position = tree.clone().multiplyScalar(.84);
+          this.size = size;
+          this.scale = size;
+          this.batch = batch;
+          this.slot = slot;
+          this.object = object;
+          this.phase = rand(0, TAU);
+          this.spin = new THREE.Vector3(rand(-1, 1), rand(-1.5, 1.5), rand(-1, 1));
+          this.angles = new THREE.Euler(rand(-.4, .4), rand(-Math.PI, Math.PI), rand(-.6, .6));
+          this.rotation = new THREE.Quaternion().setFromEuler(this.angles);
+          this.targetRotation = this.rotation.clone();
+          this.treeRotation = this.rotation.clone();
+          this.writeTransform();
+        }
+
+        writeTransform() {
+          const transform = this.object ?? matrix;
+          transform.position.copy(this.position);
+          transform.quaternion.copy(this.rotation);
+          transform.scale.setScalar(this.scale);
+          if (this.batch) {
+            transform.updateMatrix();
+            this.batch.setMatrixAt(this.slot, transform.matrix);
+          }
+        }
+
+        update(delta, blend, elapsed) {
+          let targetScale = this.size;
+          if (STATE.mode === MODES.TREE) {
+            positionTarget.copy(this.tree);
+            positionTarget.y += Math.sin(elapsed * 1.3 + this.phase) * .09;
+            this.targetRotation.copy(this.treeRotation);
+          } else if (STATE.mode === MODES.SCATTER) {
+            positionTarget.copy(this.scatter);
+            positionTarget.y += Math.sin(elapsed * .85 + this.phase) * .35;
+            this.angles.x += this.spin.x * delta;
+            this.angles.y += this.spin.y * delta;
+            this.angles.z += this.spin.z * delta;
+            this.targetRotation.setFromEuler(this.angles);
+          } else if (this === STATE.focus) {
+            positionTarget.copy(focusPosition);
+            targetScale = 4.5;
+            this.targetRotation.copy(focusRotation);
+          } else {
+            positionTarget.copy(this.background);
+            targetScale *= .68;
+            this.targetRotation.copy(this.treeRotation);
+          }
+
+          this.position.lerp(positionTarget, blend);
+          this.rotation.slerp(this.targetRotation, blend);
+          this.scale = THREE.MathUtils.lerp(this.scale, targetScale, blend);
+          this.writeTransform();
+        }
+      }
+
+      function canvasTexture(canvas) {
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        return texture;
+      }
+
+      function makeCandyCane() {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 128;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fffaf2";
+        ctx.fillRect(0, 0, 128, 128);
+        ctx.strokeStyle = "#b80e23";
+        ctx.lineWidth = 15;
+        for (let x = -128; x < 128; x += 32) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x + 128, 128);
+          ctx.stroke();
+        }
+        const texture = canvasTexture(canvas);
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(2, 1);
+        const path = [new THREE.Vector3(0, -.95, 0), new THREE.Vector3(0, -.4, 0)];
+        for (let step = 0; step <= 10; step++) {
+          const angle = Math.PI * (1 - step / 10);
+          path.push(new THREE.Vector3(.33 + .33 * Math.cos(angle), .45 + .33 * Math.sin(angle), 0));
+        }
+        path.push(new THREE.Vector3(.66, .26, 0));
+        return {
+          geometry: new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path), 28, .09, 8, false),
+          material: new THREE.MeshPhysicalMaterial({ map: texture, roughness: .27, clearcoat: .36 })
+        };
+      }
+
+      const box = new THREE.BoxGeometry(.64, .64, .64);
+      const sphere = new THREE.SphereGeometry(.39, 12, 9);
+      const candy = makeCandyCane();
+      const styles = [
+        { type: "BOX", count: 265, geometry: box,
+          material: new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: .76, roughness: .27 }) },
+        { type: "BOX", count: 620, geometry: box,
+          material: new THREE.MeshStandardMaterial({ color: 0x124938, metalness: .3, roughness: .4 }) },
+        { type: "SPHERE", count: 365, geometry: sphere,
+          material: new THREE.MeshPhysicalMaterial({
+            color: 0xf6c95b, metalness: .66, roughness: .24, emissive: 0x9a4a08, emissiveIntensity: .16
+          }) },
+        { type: "SPHERE", count: 222, geometry: sphere,
+          material: new THREE.MeshPhysicalMaterial({
+            color: 0xbd1735, metalness: .36, roughness: .28, clearcoat: .9, clearcoatRoughness: .15
+          }) },
+        { type: "CANDY", count: 28, geometry: candy.geometry, material: candy.material }
+      ];
+      const batches = styles.map(({ geometry, material, count }) => {
+        const mesh = new THREE.InstancedMesh(geometry, material, count);
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        mesh.frustumCulled = false;
+        mainGroup.add(mesh);
+        return mesh;
+      });
+      const slots = styles.map(() => 0);
+      const distribution = styles.flatMap(({ count }, index) => Array(count).fill(index));
+      for (let i = distribution.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [distribution[i], distribution[j]] = [distribution[j], distribution[i]];
+      }
+      for (let i = 0; i < MAIN_COUNT; i++) {
+        const styleIndex = distribution[i];
+        const { type } = styles[styleIndex];
+        const t = i / (MAIN_COUNT - 1);
+        const isCane = type === "CANDY";
+        const isGreen = styleIndex === 1;
+        const angle = t * 50 * Math.PI + rand(-.49, .49);
+        const thickness = isCane ? rand(.94, 1.14) : isGreen ? rand(.48, 1.02) : rand(.7, 1.08);
+        const tree = treePosition(t, angle, thickness);
+        tree.y += rand(-.33, .33);
+        const size = isCane ? rand(.6, .98) : isGreen ? rand(.41, .86) : rand(.27, .66);
+        particles.push(new Particle(type, tree, size, batches[styleIndex], slots[styleIndex]++));
+      }
+
+      function makeStar() {
+        const outline = new THREE.Shape();
+        for (let point = 0; point < 10; point++) {
+          const angle = Math.PI / 2 + point * Math.PI / 5;
+          const radius = point % 2 === 0 ? 1.34 : .53;
+          const x = Math.cos(angle) * radius;
+          const y = Math.sin(angle) * radius;
+          if (point === 0) outline.moveTo(x, y);
+          else outline.lineTo(x, y);
+        }
+        outline.closePath();
+        const geometry = new THREE.ExtrudeGeometry(outline, {
+          depth: .16, bevelEnabled: true, bevelSegments: 2, bevelSize: .085, bevelThickness: .07
+        });
+        geometry.center();
+        return new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+          color: 0xfceea7, metalness: .69, roughness: .28,
+          emissive: 0xffa237, emissiveIntensity: .9
+        }));
+      }
+      const star = makeStar();
+      const starParticle = new Particle("STAR", new THREE.Vector3(0, 12.85, 0), 1, null, 0, star);
+      starParticle.treeRotation.identity();
+      mainGroup.add(star);
+      particles.push(starParticle);
+
+      const dustPosition = new Float32Array(DUST_COUNT * 3);
+      const dustStyle = new Float32Array(DUST_COUNT * 2);
+      for (let i = 0; i < DUST_COUNT; i++) {
+        const point = i % 3 === 0
+          ? treePosition(rand(0, 1), rand(0, TAU), rand(.8, 1.3))
+          : randomShellPoint().multiplyScalar(rand(1.15, 1.85));
+        dustPosition.set(point.toArray(), i * 3);
+        dustStyle.set([rand(.15, 1), rand(0, TAU)], i * 2);
+      }
+      const dustGeometry = new THREE.BufferGeometry();
+      dustGeometry.setAttribute("position", new THREE.BufferAttribute(dustPosition, 3));
+      dustGeometry.setAttribute("style", new THREE.BufferAttribute(dustStyle, 2));
+      const dustMaterial = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uTime: { value: 0 }, uPixelRatio: { value: 1 } },
+        vertexShader: `
+          uniform float uTime;
+          uniform float uPixelRatio;
+          attribute vec2 style;
+          varying float brightness;
+
+          void main() {
+            vec3 positionWithDrift = position;
+            positionWithDrift.x += sin(uTime * .35 + style.y) * .4;
+            positionWithDrift.y += cos(uTime * .48 + style.y) * .45;
+            vec4 view = modelViewMatrix * vec4(positionWithDrift, 1.);
+            gl_Position = projectionMatrix * view;
+            gl_PointSize = clamp((48. + 140. * style.x) / -view.z, 1., 6.) * uPixelRatio;
+            brightness = style.x * (.58 + .42 * sin(uTime * 1.4 + style.y));
+          }
+        `,
+        fragmentShader: `
+          varying float brightness;
+
+          void main() {
+            float radius = distance(gl_PointCoord, vec2(.5));
+            float glow = 1. - smoothstep(.02, .5, radius);
+            float core = 1. - smoothstep(.0, .2, radius);
+            gl_FragColor = vec4(vec3(1., .64, .23) + core * vec3(.7, .58, .38),
+                                glow * brightness * .73);
+          }
+        `
+      });
+      const dust = new THREE.Points(dustGeometry, dustMaterial);
+      scene.add(dust);
+
+      function makeDefaultPhoto() {
+        const canvas = document.createElement("canvas");
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext("2d");
+        const paper = ctx.createRadialGradient(320, 205, 5, 320, 240, 360);
+        paper.addColorStop(0, "#e6d1a4");
+        paper.addColorStop(1, "#cda462");
+        ctx.fillStyle = paper;
+        ctx.fillRect(0, 0, 640, 480);
+        ctx.strokeStyle = "#81542a";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(25, 25, 590, 430);
+        ctx.strokeRect(34, 34, 572, 412);
+        ctx.fillStyle = "#8d272a";
+        ctx.textAlign = "center";
+        ctx.font = '70px "Times New Roman", serif';
+        ctx.fillText("JOYEUX NOEL", 320, 264);
+        ctx.fillStyle = "#85561e";
+        ctx.font = '34px "Times New Roman", serif';
+        ctx.fillText("✧   ✦   ✧", 320, 173);
+        ctx.fillText("✦", 320, 342);
+        return canvasTexture(canvas);
+      }
+
+      const frameMaterial = new THREE.MeshStandardMaterial({
+        color: 0xd4af37, metalness: .76, roughness: .28
+      });
+      const frameBox = new THREE.BoxGeometry(1, 1, 1);
+
+      function addPhotoToScene(texture) {
+        const { width, height } = texture.image;
+        const aspect = width / height;
+        const photoWidth = 1.65 * Math.min(1, aspect);
+        const photoHeight = 1.65 * Math.min(1, 1 / aspect);
+        const group = new THREE.Group();
+        const image = new THREE.Mesh(
+          new THREE.PlaneGeometry(photoWidth, photoHeight),
+          new THREE.MeshBasicMaterial({ map: texture, toneMapped: false })
+        );
+        image.position.z = .086;
+        group.add(image);
+
+        const backing = new THREE.Mesh(frameBox, frameMaterial);
+        backing.scale.set(photoWidth + .11, photoHeight + .11, .12);
+        group.add(backing);
+        for (const side of [-1, 1]) {
+          const horizontal = new THREE.Mesh(frameBox, frameMaterial);
+          horizontal.scale.set(photoWidth + .16, .08, .15);
+          horizontal.position.set(0, side * (photoHeight / 2 + .04), .042);
+          const vertical = new THREE.Mesh(frameBox, frameMaterial);
+          vertical.scale.set(.08, photoHeight, .15);
+          vertical.position.set(side * (photoWidth / 2 + .04), 0, .042);
+          group.add(horizontal, vertical);
+        }
+
+        const slot = photos.length;
+        const t = slot === 0 ? .38 : .17 + ((slot * .61803398875) % 1) * .58;
+        const angle = slot === 0 ? Math.PI / 2 : Math.PI / 2 + slot * 2.39996323;
+        const particle = new Particle(
+          "PHOTO", treePosition(t, angle, 1.13), 1.02, null, 0, group
+        );
+        particle.treeRotation.setFromEuler(new THREE.Euler(-.06, Math.PI / 2 - angle, rand(-.13, .13)));
+        particle.targetRotation.copy(particle.treeRotation);
+        particle.rotation.copy(particle.treeRotation);
+        particle.writeTransform();
+        photos.push(particle);
+        particles.push(particle);
+        mainGroup.add(group);
+        return particle;
+      }
+      addPhotoToScene(makeDefaultPhoto());
+
+      function setStatus(message = "") {
+        status.textContent = message;
+        status.hidden = !message;
+      }
+
+      function setMode(mode) {
+        STATE.mode = mode;
+        if (mode === MODES.FOCUS) {
+          const candidates = photos.filter(particle =>
+            particle.type === "PHOTO" && (photos.length === 1 || particle !== STATE.focus)
+          );
+          STATE.focus = candidates[Math.floor(Math.random() * candidates.length)];
+        }
+        for (const button of modeButtons) {
+          button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+        }
+      }
+
+      const photoInput = document.querySelector("#photo-input");
+      document.querySelector("#upload-button").addEventListener("click", () => photoInput.click());
+      photoInput.addEventListener("change", () => {
+        setStatus();
+        for (const f of photoInput.files) {
+          const reader = new FileReader();
+          reader.onerror = () => setStatus("Could not read this image.");
+          reader.onload = (ev) => {
+            new THREE.TextureLoader().load(ev.target.result, (t) => {
+              t.colorSpace = THREE.SRGBColorSpace;
+              addPhotoToScene(t);
+            }, undefined, () => setStatus("Could not open this image."));
+          };
+          reader.readAsDataURL(f);
+        }
+        photoInput.value = "";
+      });
+
+      for (const button of modeButtons) {
+        button.addEventListener("click", () => setMode(button.dataset.mode));
+      }
+      const keyboardModes = { "1": MODES.TREE, "2": MODES.SCATTER, "3": MODES.FOCUS };
+      window.addEventListener("keydown", (event) => {
+        if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+        if (event.key.toLowerCase() === "h") {
+          controls.inert = controls.classList.toggle("ui-hidden");
+        } else if (Object.hasOwn(keyboardModes, event.key)) {
+          setMode(keyboardModes[event.key]);
+        }
+      });
+
+      let handLandmarker = null;
+      let stream = null;
+      let previousVideoTime = -1;
+      let previousInference = -Infinity;
+
+      async function loadHandLandmarker() {
+        const { FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision");
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+        );
+        return await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            delegate: "GPU"
+          },
+          runningMode: "VIDEO",
+          numHands: 1
+        });
+      }
+
+      function stopCamera() {
+        stream?.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+        stream = null;
+        STATE.gesture.detected = false;
+        STATE.gesture.name = null;
+        cameraButton.textContent = "Enable camera";
+        cameraButton.setAttribute("aria-pressed", "false");
+      }
+
+      async function toggleCamera() {
+        if (stream) {
+          stopCamera();
+          setStatus();
+          return;
+        }
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setStatus("Camera access needs HTTPS or localhost.");
+          return;
+        }
+
+        cameraButton.disabled = true;
+        cameraButton.textContent = "Starting camera…";
+        setStatus();
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }
+          });
+          video.srcObject = stream;
+          await video.play();
+          handLandmarker ??= await loadHandLandmarker();
+          previousVideoTime = -1;
+          cameraButton.textContent = "Disable camera";
+          cameraButton.setAttribute("aria-pressed", "true");
+        } catch (error) {
+          stopCamera();
+          setStatus(error.name === "NotAllowedError"
+            ? "Allow camera access to use hand gestures."
+            : "Hand tracking is unavailable. Use the mode buttons.");
+          console.warn("Camera initialization failed", error);
+        } finally {
+          cameraButton.disabled = false;
+        }
+      }
+
+      cameraButton.addEventListener("click", toggleCamera);
+      window.addEventListener("pagehide", stopCamera);
+
+      const fingertipIndices = [8, 12, 16, 20];
+
+      function processGestures(landmarks) {
+        if (!landmarks) {
+          STATE.gesture.detected = false;
+          STATE.gesture.name = null;
+          return;
+        }
+        const wrist = landmarks[0];
+        const thumb = landmarks[4];
+        const index = landmarks[8];
+        const palm = landmarks[9];
+        const pinchDistance = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+        const fingerDistance = fingertipIndices.reduce((sum, tipIndex) => {
+          const tip = landmarks[tipIndex];
+          return sum + Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+        }, 0) / fingertipIndices.length;
+
+        let gestureMode = null;
+        if (pinchDistance < .05) gestureMode = MODES.FOCUS;
+        else if (fingerDistance < .25) gestureMode = MODES.TREE;
+        else if (fingerDistance > .4) gestureMode = MODES.SCATTER;
+
+        STATE.gesture.x = palm.x;
+        STATE.gesture.y = palm.y;
+        STATE.gesture.detected = true;
+        if (gestureMode && (gestureMode !== STATE.gesture.name || STATE.mode !== gestureMode)) {
+          setMode(gestureMode);
+        }
+        STATE.gesture.name = gestureMode;
+      }
+
+      function detectHand(now) {
+        if (!stream || !handLandmarker || video.readyState < 2 ||
+            now - previousInference < 42 || video.currentTime === previousVideoTime) return;
+        previousInference = now;
+        previousVideoTime = video.currentTime;
+
+        try {
+          const aspect = visionFrame.width / visionFrame.height;
+          const cropWidth = Math.min(video.videoWidth, video.videoHeight * aspect);
+          const cropHeight = cropWidth / aspect;
+          visionContext.drawImage(video,
+            (video.videoWidth - cropWidth) / 2, (video.videoHeight - cropHeight) / 2,
+            cropWidth, cropHeight, 0, 0, visionFrame.width, visionFrame.height
+          );
+          const result = handLandmarker.detectForVideo(visionFrame, now);
+          processGestures(result.landmarks[0]);
+        } catch (error) {
+          stopCamera();
+          handLandmarker.close();
+          handLandmarker = null;
+          setStatus("Hand tracking stopped. You can enable the camera again.");
+          console.warn("Hand inference failed", error);
+        }
+      }
+
+      function framingFov() {
+        const focus = STATE.mode === MODES.FOCUS;
+        const vertical = focus ? .44 : Math.tan(THREE.MathUtils.degToRad(20));
+        const horizontal = focus ? .32 : .255;
+        return THREE.MathUtils.radToDeg(2 * Math.atan(Math.max(vertical, horizontal / camera.aspect)));
+      }
+
+      function resize() {
+        const width = Math.max(1, innerWidth);
+        const height = Math.max(1, innerHeight);
+        const pixelRatio = Math.min(devicePixelRatio || 1, 1.75);
+        camera.aspect = width / height;
+        camera.fov = framingFov();
+        camera.updateProjectionMatrix();
+        renderer.setPixelRatio(pixelRatio);
+        renderer.setSize(width, height);
+        composer.setPixelRatio(pixelRatio);
+        composer.setSize(width, height);
+        dustMaterial.uniforms.uPixelRatio.value = pixelRatio;
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      let previousFrame = performance.now();
+      let elapsed = 0;
+      function animate(now) {
+        const delta = Math.min(Math.max((now - previousFrame) / 1000, 0), .05);
+        previousFrame = now;
+        const motionDelta = reducedMotion.matches ? 0 : delta;
+        elapsed += motionDelta;
+        detectHand(now);
+
+        const blend = 1 - Math.exp(-5 * delta);
+        const fov = framingFov();
+        if (Math.abs(fov - camera.fov) > .001) {
+          camera.fov = THREE.MathUtils.lerp(camera.fov, fov, blend);
+          camera.updateProjectionMatrix();
+        }
+        const gesture = STATE.gesture;
+        const turnX = gesture.detected ? (gesture.y - .5) * .78 : 0;
+        const turnY = gesture.detected ? (.5 - gesture.x) * 1.65 : Math.sin(elapsed * .29) * .22;
+        mainGroup.rotation.x = THREE.MathUtils.lerp(mainGroup.rotation.x, turnX, blend);
+        mainGroup.rotation.y = THREE.MathUtils.lerp(mainGroup.rotation.y, turnY, blend);
+
+        if (STATE.mode === MODES.FOCUS) {
+          mainGroup.updateMatrixWorld(true);
+          focusPosition.copy(cameraFront);
+          mainGroup.worldToLocal(focusPosition);
+          mainGroup.getWorldQuaternion(inverseRoot).invert();
+          focusRotation.copy(inverseRoot).multiply(camera.quaternion);
+        }
+
+        for (const particle of particles) particle.update(motionDelta, blend, elapsed);
+        for (const batch of batches) batch.instanceMatrix.needsUpdate = true;
+        dustMaterial.uniforms.uTime.value = elapsed;
+        composer.render();
+        requestAnimationFrame(animate);
+      }
+
+      animate(previousFrame);
+      loader.classList.add("loaded");
+    }
+
+    init().catch((error) => {
+      loader.querySelector(".spinner").hidden = true;
+      document.querySelector("#loader-message").textContent =
+        "The scene could not load. Check your connection and WebGL support, then reload.";
+      console.error("Christmas tree initialization failed", error);
+    });
+  </script>
+</body>
+</html>
