@@ -242,12 +242,13 @@
       const TREE_BASE = -6.9;
       const MAX_RADIUS = 8.4;
       const DUST_COUNT = 2500;
+      const DEFAULT_CAMERA_DISTANCE = 50;
       const rand = THREE.MathUtils.randFloat;
 
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x000000);
       const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 150);
-      camera.position.set(0, 2, 50);
+      camera.position.set(0, 2, DEFAULT_CAMERA_DISTANCE);
       camera.lookAt(0, 2, 0);
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -485,6 +486,23 @@
       const pointTime = { value: 0 };
       const pointPixelRatio = { value: 1 };
       const backgroundExtent = { value: new THREE.Vector2() };
+      const rootTransform = { value: mainGroup.matrixWorld };
+      const starPosition = starParticle.position;
+      const groundHeight = TREE_BASE - .44;
+      const groundWave = `
+        float groundWave(float radius, float time) {
+          return sin(radius * 1.25 - time * 2.65);
+        }
+        float waveStrength(float radius) {
+          return smoothstep(0., 2., radius) * (1. - .7 * smoothstep(3., 20., radius));
+        }
+      `;
+      const ribbonFlow = `
+        float ribbonFlow(float progress, float time) {
+          return pow(.5 + .5 * cos(progress * 42. - time * 4.6), 5.);
+        }
+      `;
+      const ribbonTip = { value: new THREE.Vector3() };
 
       function makeLightCloud(count, sample, effect, drawOnSmallScreen = count) {
         const positions = new Float32Array(count * 3);
@@ -511,7 +529,8 @@
           blending: THREE.AdditiveBlending,
           uniforms: {
             uTime: pointTime, uPixelRatio: pointPixelRatio, uBackgroundExtent: backgroundExtent,
-            uScatter: { value: 0 }, uFocus: { value: 0 }, uOpacity: { value: 1 }
+            uScatter: { value: 0 }, uFocus: { value: 0 }, uOpacity: { value: 1 },
+            uRootTransform: rootTransform, uGroundHeight: { value: groundHeight }, uRibbonTip: ribbonTip
           },
           vertexShader: `
             uniform float uTime;
@@ -520,12 +539,17 @@
             uniform float uFocus;
             uniform float uOpacity;
             uniform vec2 uBackgroundExtent;
+            uniform mat4 uRootTransform;
+            uniform float uGroundHeight;
+            uniform vec3 uRibbonTip;
             attribute vec3 aStyle;
             #ifdef CROWN
               attribute vec3 aScatter;
             #endif
             varying float vBrightness;
             varying float vWarmth;
+            ${groundWave}
+            ${ribbonFlow}
 
             void main() {
               float phase = aStyle.z;
@@ -543,19 +567,30 @@
                 p.y += .085 * pulse;
                 brightness *= 1. - .49 * uFocus;
               #elif defined(BACKGROUND)
-                p.xy *= uBackgroundExtent * (50. - p.z);
+                p.xy *= uBackgroundExtent * (cameraPosition.z - p.z);
                 p.y += 2.;
                 float drift = mix(.24, 1.2, smoothstep(-56., 12., p.z));
                 p.xy += drift * vec2(sin(uTime * .17 * speed + phase),
                                      cos(uTime * .24 * speed + phase));
               #elif defined(RINGS)
                 float radius = length(p.xz);
-                float wave = .5 + .5 * cos(radius * .78 - uTime * 1.4);
-                p.xz *= 1. + .011 * sin(uTime * .95 - radius * .42);
-                p.y += .07 * sin(uTime * .83 + phase);
-                brightness = aStyle.y * uOpacity * (.47 + .42 * wave + .11 * pulse);
+                float wave = groundWave(radius, uTime);
+                float strength = waveStrength(radius);
+                p.y += .65 * wave * strength;
+                brightness *= .68 + .42 * wave * strength;
+              #elif defined(ROOTS)
+                vec3 root = (uRootTransform * vec4(p, 1.)).xyz;
+                float radius = clamp(length(root.xz), 5.8, 9.35);
+                vec2 direction = normalize(root.xz + vec2(.0001, 0.));
+                vec3 ground = vec3(direction.x * radius, uGroundHeight, direction.y * radius);
+                float wave = groundWave(radius, uTime);
+                ground.y += .65 * wave * waveStrength(radius);
+                p = mix(ground, root, phase);
+                brightness *= mix(.65 + .22 * wave, 1., phase);
               #elif defined(RIBBON)
-                brightness = aStyle.y * uOpacity * (.83 + .17 * sin(uTime * 1.35 - p.y * .73));
+                p += uRibbonTip * smoothstep(.77, 1., phase);
+                brightness = aStyle.y * uOpacity * smoothstep(0., .035, phase)
+                  * (.34 + .66 * ribbonFlow(phase, uTime));
               #endif
 
               #ifdef RAYS
@@ -629,29 +664,114 @@
       }, "CROWN", 10400);
       mainGroup.add(crown);
 
-      const ribbon = makeLightCloud(2300, (i) => {
-        // Interleave height samples so a lower draw count still covers all turns.
-        const t = .025 + ((i * .61803398875) % 1) * .944;
-        const angle = t * TAU * 5.65 + .53;
-        const point = treePosition(t, angle, 1.076 + rand(-.019, .022));
-        point.y += .085 + rand(-.06, .06);
-        return { point, size: rand(1.35, 2.55), brightness: rand(.39, .82) };
+      function ribbonCenter(t) {
+        const point = treePosition(t, t * TAU * 5.65 + .53, 1.076);
+        point.y += .06 + .79 * THREE.MathUtils.smoothstep(t, .84, 1);
+        return point;
+      }
+
+      function ribbonWidth(t) {
+        return (.34 + .16 * (1 - t)) * (1 - THREE.MathUtils.smoothstep(t, .82, 1));
+      }
+
+      function makeRibbonSurface() {
+        const segments = 480;
+        const positions = [];
+        const uvs = [];
+        const indices = [];
+        for (let i = 0; i <= segments; i++) {
+          const t = i / segments;
+          const center = ribbonCenter(t);
+          const width = ribbonWidth(t);
+          for (const side of [-1, 1]) {
+            positions.push(center.x, center.y + side * width / 2, center.z);
+            uvs.push(t, (side + 1) / 2);
+          }
+          const left = 2 * i;
+          if (i < segments) indices.push(left, left + 1, left + 2, left + 1, left + 3, left + 2);
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+        geometry.setIndex(indices);
+        const material = new THREE.ShaderMaterial({
+          side: THREE.DoubleSide,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          uniforms: { uTime: pointTime, uRibbonTip: ribbonTip, uOpacity: { value: 1 } },
+          vertexShader: `
+            uniform float uTime;
+            uniform vec3 uRibbonTip;
+            varying vec2 vRibbon;
+            void main() {
+              vRibbon = uv;
+              vec3 p = position + uRibbonTip * smoothstep(.77, 1., uv.x);
+              p.y += (uv.y - .5) * .11 * sin(uTime * 1.7 - uv.x * 31.)
+                * (1. - smoothstep(.82, 1., uv.x));
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.);
+            }
+          `,
+          fragmentShader: `
+            uniform float uTime;
+            uniform float uOpacity;
+            varying vec2 vRibbon;
+            ${ribbonFlow}
+            void main() {
+              float edge = abs(2. * vRibbon.y - 1.);
+              float veil = 1. - smoothstep(.22, 1., edge);
+              float hem = smoothstep(.56, .87, edge) * (1. - smoothstep(.91, 1., edge));
+              float crest = ribbonFlow(vRibbon.x, uTime);
+              vec3 color = mix(vec3(1., .61, .24), vec3(1.22, 1.05, .73), .27 + .53 * crest + .2 * hem);
+              float opacity = (.21 * veil + .16 * hem) * (.72 + .38 * crest)
+                * smoothstep(0., .036, vRibbon.x) * uOpacity;
+              gl_FragColor = vec4(color, opacity);
+            }
+          `
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.frustumCulled = false;
+        return mesh;
+      }
+
+      const ribbonSurface = makeRibbonSurface();
+      const ribbonSparks = makeLightCloud(2300, (i) => {
+        // Interleave samples along the helix to keep every turn at lower density.
+        const t = ((i + .5) * .61803398875) % 1;
+        const point = ribbonCenter(t);
+        point.y += rand(-.54, .54) * ribbonWidth(t);
+        return { point, size: rand(1.3, 2.65), brightness: rand(.36, .88), phase: t };
       }, "RIBBON", 1600);
-      mainGroup.add(ribbon);
+      const ribbonRestTip = ribbonCenter(1);
+      mainGroup.add(ribbonSurface, ribbonSparks);
 
       const groundRings = makeLightCloud(9700, (i) => {
         const ring = i % 3;
         const radius = [8.8, 13.1, 18.1][ring];
         const angle = rand(0, TAU);
-        const distance = radius + rand(-.57, .57) + rand(-.48, .48) * (ring + 1);
+        const filler = i % 5 === 0;
+        const distance = filler ? 20 * Math.sqrt(Math.random())
+          : radius + rand(-.68, .68) + rand(-.49, .49) * (ring + 1);
         return {
-          point: new THREE.Vector3(Math.cos(angle) * distance, TREE_BASE - .44 + rand(-.13, .13),
+          point: new THREE.Vector3(Math.cos(angle) * distance, groundHeight + rand(-.12, .12),
             Math.sin(angle) * distance),
           size: rand(.9, 1.95),
-          brightness: rand(.24, .68) * (1 - ring * .15)
+          brightness: rand(.26, .78) * (filler ? .45 : 1 - ring * .14)
         };
       }, "RINGS", 6900);
       scene.add(groundRings);
+
+      const roots = makeLightCloud(3900, () => {
+        const angle = rand(0, TAU);
+        const t = rand(.002, .085);
+        return {
+          point: treePosition(t, angle, rand(.74, 1.07)),
+          size: rand(1.08, 2.25),
+          brightness: rand(.27, .72),
+          phase: Math.random()
+        };
+      }, "ROOTS", 2800);
+      scene.add(roots);
 
       const starRays = makeLightCloud(530, (i) => {
         const ray = i % 11;
@@ -804,6 +924,10 @@
       let previousVideoTime = -1;
       let previousInference = -Infinity;
       const gestureTransition = { candidate: null, since: 0, latched: null, releasedSince: null };
+      const handZoom = {
+        distance: DEFAULT_CAMERA_DISTANCE, anchorDistance: DEFAULT_CAMERA_DISTANCE,
+        reference: null, filtered: null, samples: [], lastSample: null
+      };
 
       async function loadHandLandmarker() {
         const { FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision");
@@ -827,6 +951,7 @@
         STATE.gesture.detected = false;
         STATE.gesture.name = null;
         Object.assign(gestureTransition, { candidate: null, latched: null, releasedSince: null });
+        resetHandZoom();
         cameraButton.textContent = "Enable camera";
         cameraButton.setAttribute("aria-pressed", "false");
       }
@@ -939,10 +1064,74 @@
         return gesture;
       }
 
+      function measurePalm(landmarks, world) {
+        const palmIndices = [0, 5, 9, 13, 17];
+        if (!palmIndices.every(index => {
+          const image = landmarks?.[index];
+          const point = world?.[index];
+          return image && point && [image.x, image.y, point.x, point.y, point.z].every(Number.isFinite)
+            && image.x > .025 && image.x < .975 && image.y > .025 && image.y < .975;
+        })) return null;
+
+        const across = handVector(world[17], world[5]);
+        const along = handVector(world[9], world[0]);
+        const normal = across.cross(along);
+        const facing = Math.abs(normal.z) / normal.length();
+        if (!(facing > .58)) return null;
+
+        const spans = [[0, 5], [0, 9], [0, 13], [0, 17], [5, 17]].map(([a, b]) =>
+          Math.hypot((landmarks[a].x - landmarks[b].x) * visionFrame.width,
+            (landmarks[a].y - landmarks[b].y) * visionFrame.height)
+        ).sort((a, b) => a - b);
+        return spans[2] >= 7 ? { span: spans[2], facing } : null;
+      }
+
+      function resetHandZoom() {
+        handZoom.reference = null;
+        handZoom.filtered = null;
+        handZoom.samples.length = 0;
+        handZoom.lastSample = null;
+      }
+
+      function updateHandZoom(sample, now) {
+        if (!sample) {
+          if (handZoom.lastSample !== null && now - handZoom.lastSample > 230) resetHandZoom();
+          return;
+        }
+        const stale = handZoom.lastSample !== null && now - handZoom.lastSample > 230;
+        if (stale) resetHandZoom();
+        if (handZoom.reference && Math.abs(handZoom.reference.facing - sample.facing) > .18) return;
+        handZoom.lastSample = now;
+
+        if (!handZoom.reference) {
+          const samples = handZoom.samples;
+          samples.push(sample);
+          if (samples.length < 5) return;
+          const sorted = samples.map(point => point.span).sort((a, b) => a - b);
+          const angles = samples.map(point => point.facing);
+          if (sorted[4] / sorted[0] > 1.13 || Math.max(...angles) - Math.min(...angles) > .13) {
+            samples.shift();
+            return;
+          }
+          handZoom.reference = { span: sorted[2], facing: angles.reduce((sum, angle) => sum + angle, 0) / 5 };
+          handZoom.filtered = sorted[2];
+          handZoom.anchorDistance = handZoom.distance;
+          return;
+        }
+
+        const reference = handZoom.reference;
+        handZoom.filtered = THREE.MathUtils.lerp(handZoom.filtered, sample.span, .24);
+        const offset = Math.log(handZoom.filtered / reference.span);
+        const travel = Math.sign(offset) * Math.max(0, Math.abs(offset) - .045);
+        handZoom.distance = THREE.MathUtils.clamp(handZoom.anchorDistance - 34 * travel, 44.5, 64);
+      }
+
       function processGestures(result, now, frameGap) {
-        const palm = result.landmarks[0]?.[9];
+        const landmarks = result.landmarks[0];
+        const world = result.worldLandmarks?.[0];
+        const palm = landmarks?.[9];
         const visible = Boolean(palm && Number.isFinite(palm.x) && Number.isFinite(palm.y));
-        const gesture = visible ? classifyHand(result.worldLandmarks?.[0]) : null;
+        const gesture = visible ? classifyHand(world) : null;
         const state = STATE.gesture;
         if (visible) {
           state.x = palm.x;
@@ -953,6 +1142,11 @@
         const confirmed = updateGestureTransition(gesture, trackable, now, frameGap);
         state.name = trackable ? gestureTransition.latched : null;
         if (confirmed && (confirmed !== STATE.mode || confirmed === MODES.FOCUS)) setMode(confirmed);
+        if (STATE.mode === MODES.FOCUS || view.pointer) {
+          resetHandZoom();
+        } else {
+          updateHandZoom(trackable ? measurePalm(landmarks, world) : null, now);
+        }
       }
 
       function detectHand(now) {
@@ -1049,7 +1243,9 @@
         treeBlend.trim = THREE.MathUtils.lerp(treeBlend.trim, Number(!scatter && !focus), blend);
         crown.material.uniforms.uScatter.value = treeBlend.scatter;
         crown.material.uniforms.uFocus.value = treeBlend.focus;
-        for (const trim of [ribbon, groundRings, starRays]) {
+        ribbonTip.value.copy(starPosition).sub(ribbonRestTip);
+        mainGroup.updateWorldMatrix(true, false);
+        for (const trim of [ribbonSurface, ribbonSparks, groundRings, roots, starRays]) {
           trim.material.uniforms.uOpacity.value = treeBlend.trim;
           trim.visible = treeBlend.trim > .004;
         }
@@ -1085,6 +1281,8 @@
         detectHand(now);
 
         const blend = 1 - Math.exp(-5 * delta);
+        const cameraDistance = STATE.mode === MODES.FOCUS ? DEFAULT_CAMERA_DISTANCE : handZoom.distance;
+        camera.position.z = THREE.MathUtils.lerp(camera.position.z, cameraDistance, blend);
         const fov = framingFov();
         if (Math.abs(fov - camera.fov) > .001) {
           camera.fov = THREE.MathUtils.lerp(camera.fov, fov, blend);
