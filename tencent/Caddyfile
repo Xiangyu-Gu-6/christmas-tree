@@ -1,0 +1,5 @@
+{$SITE_HOSTNAME} {
+  reverse_proxy 127.0.0.1:8080 {
+    header_up X-Christmas-Client-IP {remote_host}
+  }
+}
