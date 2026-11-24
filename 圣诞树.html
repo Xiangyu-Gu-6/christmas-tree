@@ -20,6 +20,8 @@
     *, *::before, *::after { box-sizing: border-box; }
     body { margin: 0; overflow: hidden; }
     #stage, #controls, #loader { position: fixed; inset: 0; }
+    #stage { touch-action: none; cursor: grab; }
+    #stage.dragging { cursor: grabbing; }
     #stage canvas { display: block; width: 100%; height: 100%; }
     #controls { pointer-events: none; transition: opacity .35s ease; }
     #controls.ui-hidden { opacity: 0; pointer-events: none; }
@@ -168,7 +170,7 @@
   </script>
 </head>
 <body>
-  <main id="stage" aria-label="Interactive 3D Christmas tree"></main>
+  <main id="stage" aria-label="Interactive 3D Christmas tree. Drag to rotate."></main>
   <div id="controls">
     <header class="masthead">
       <h1>Merry Christmas</h1>
@@ -239,7 +241,6 @@
       const TREE_HEIGHT = 18.9;
       const TREE_BASE = -6.9;
       const MAX_RADIUS = 8.4;
-      const MAIN_COUNT = 1500;
       const DUST_COUNT = 2500;
       const rand = THREE.MathUtils.randFloat;
 
@@ -269,6 +270,7 @@
       composer.addPass(new OutputPass());
 
       const mainGroup = new THREE.Group();
+      mainGroup.rotation.order = "YXZ";
       scene.add(mainGroup, new THREE.AmbientLight(0xffffff, .6));
       const innerLight = new THREE.PointLight(0xff8b34, 2);
       innerLight.position.set(0, 2, 0);
@@ -305,9 +307,6 @@
       const matrix = new THREE.Object3D();
       const positionTarget = new THREE.Vector3();
       const cameraFront = new THREE.Vector3(0, 2, 35);
-      const inverseRoot = new THREE.Quaternion();
-      const focusRotation = new THREE.Quaternion();
-      const focusPosition = new THREE.Vector3();
 
       class Particle {
         constructor(type, tree, size, batch = null, slot = 0, object = null) {
@@ -315,8 +314,8 @@
           this.tree = tree;
           this.scatter = randomShellPoint();
           // Leave an opening in front of the background for the focused frame.
-          this.background = this.scatter.clone().multiplyScalar(1.22);
-          this.background.z -= 13;
+          this.background = this.scatter.clone().multiplyScalar(1.12);
+          this.background.z -= 8;
           this.position = tree.clone().multiplyScalar(.84);
           this.size = size;
           this.scale = size;
@@ -357,9 +356,9 @@
             this.angles.z += this.spin.z * delta;
             this.targetRotation.setFromEuler(this.angles);
           } else if (this === STATE.focus) {
-            positionTarget.copy(focusPosition);
+            positionTarget.copy(cameraFront);
             targetScale = 4.5;
-            this.targetRotation.copy(focusRotation);
+            this.targetRotation.copy(camera.quaternion);
           } else {
             positionTarget.copy(this.background);
             targetScale *= .68;
@@ -413,19 +412,19 @@
       const sphere = new THREE.SphereGeometry(.39, 12, 9);
       const candy = makeCandyCane();
       const styles = [
-        { type: "BOX", count: 265, geometry: box,
+        { type: "BOX", count: 19, geometry: box,
           material: new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: .76, roughness: .27 }) },
-        { type: "BOX", count: 620, geometry: box,
+        { type: "BOX", count: 17, geometry: box,
           material: new THREE.MeshStandardMaterial({ color: 0x124938, metalness: .3, roughness: .4 }) },
-        { type: "SPHERE", count: 365, geometry: sphere,
+        { type: "SPHERE", count: 34, geometry: sphere,
           material: new THREE.MeshPhysicalMaterial({
             color: 0xf6c95b, metalness: .66, roughness: .24, emissive: 0x9a4a08, emissiveIntensity: .16
           }) },
-        { type: "SPHERE", count: 222, geometry: sphere,
+        { type: "SPHERE", count: 19, geometry: sphere,
           material: new THREE.MeshPhysicalMaterial({
             color: 0xbd1735, metalness: .36, roughness: .28, clearcoat: .9, clearcoatRoughness: .15
           }) },
-        { type: "CANDY", count: 28, geometry: candy.geometry, material: candy.material }
+        { type: "CANDY", count: 12, geometry: candy.geometry, material: candy.material }
       ];
       const batches = styles.map(({ geometry, material, count }) => {
         const mesh = new THREE.InstancedMesh(geometry, material, count);
@@ -440,25 +439,26 @@
         const j = Math.floor(Math.random() * (i + 1));
         [distribution[i], distribution[j]] = [distribution[j], distribution[i]];
       }
-      for (let i = 0; i < MAIN_COUNT; i++) {
+      for (let i = 0; i < distribution.length; i++) {
         const styleIndex = distribution[i];
         const { type } = styles[styleIndex];
-        const t = i / (MAIN_COUNT - 1);
-        const isCane = type === "CANDY";
-        const isGreen = styleIndex === 1;
-        const angle = t * 50 * Math.PI + rand(-.49, .49);
-        const thickness = isCane ? rand(.94, 1.14) : isGreen ? rand(.48, 1.02) : rand(.7, 1.08);
-        const tree = treePosition(t, angle, thickness);
-        tree.y += rand(-.33, .33);
-        const size = isCane ? rand(.6, .98) : isGreen ? rand(.41, .86) : rand(.27, .66);
-        particles.push(new Particle(type, tree, size, batches[styleIndex], slots[styleIndex]++));
+        const t = (i + .5) / distribution.length * .92;
+        const angle = i * 2.39996323 + rand(-.15, .15);
+        const tree = treePosition(t, angle, rand(.88, 1.08));
+        tree.y += rand(-.25, .25);
+        const size = type === "CANDY" ? rand(.55, .78) : rand(.37, .68);
+        const ornament = new Particle(type, tree, size, batches[styleIndex], slots[styleIndex]++);
+        if (type === "CANDY") {
+          ornament.treeRotation.setFromEuler(new THREE.Euler(.06, Math.PI / 2 - angle, rand(-.28, .28)));
+        }
+        particles.push(ornament);
       }
 
       function makeStar() {
         const outline = new THREE.Shape();
         for (let point = 0; point < 10; point++) {
           const angle = Math.PI / 2 + point * Math.PI / 5;
-          const radius = point % 2 === 0 ? 1.34 : .53;
+          const radius = point % 2 === 0 ? .92 : .36;
           const x = Math.cos(angle) * radius;
           const y = Math.sin(angle) * radius;
           if (point === 0) outline.moveTo(x, y);
@@ -471,7 +471,7 @@
         geometry.center();
         return new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
           color: 0xfceea7, metalness: .69, roughness: .28,
-          emissive: 0xffa237, emissiveIntensity: .9
+          emissive: 0xffae4f, emissiveIntensity: .75
         }));
       }
       const star = makeStar();
@@ -480,53 +480,193 @@
       mainGroup.add(star);
       particles.push(starParticle);
 
-      const dustPosition = new Float32Array(DUST_COUNT * 3);
-      const dustStyle = new Float32Array(DUST_COUNT * 2);
-      for (let i = 0; i < DUST_COUNT; i++) {
-        const point = i % 3 === 0
-          ? treePosition(rand(0, 1), rand(0, TAU), rand(.8, 1.3))
-          : randomShellPoint().multiplyScalar(rand(1.15, 1.85));
-        dustPosition.set(point.toArray(), i * 3);
-        dustStyle.set([rand(.15, 1), rand(0, TAU)], i * 2);
+      const lightClouds = [];
+      const treeBlend = { scatter: 0, focus: 0, trim: 1 };
+      const pointTime = { value: 0 };
+      const pointPixelRatio = { value: 1 };
+      const backgroundExtent = { value: new THREE.Vector2() };
+
+      function makeLightCloud(count, sample, effect, drawOnSmallScreen = count) {
+        const positions = new Float32Array(count * 3);
+        const styles = new Float32Array(count * 3);
+        const destinations = effect === "CROWN" ? new Float32Array(count * 3) : null;
+        for (let i = 0; i < count; i++) {
+          const { point, size, brightness, phase = rand(0, TAU) } = sample(i);
+          point.toArray(positions, i * 3);
+          styles.set([size, brightness, phase], i * 3);
+          if (destinations) randomShellPoint().toArray(destinations, i * 3);
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute("aStyle", new THREE.BufferAttribute(styles, 3));
+        if (destinations) {
+          geometry.setAttribute("aScatter", new THREE.BufferAttribute(destinations, 3));
+        }
+
+        const material = new THREE.ShaderMaterial({
+          defines: { [effect]: 1 },
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          uniforms: {
+            uTime: pointTime, uPixelRatio: pointPixelRatio, uBackgroundExtent: backgroundExtent,
+            uScatter: { value: 0 }, uFocus: { value: 0 }, uOpacity: { value: 1 }
+          },
+          vertexShader: `
+            uniform float uTime;
+            uniform float uPixelRatio;
+            uniform float uScatter;
+            uniform float uFocus;
+            uniform float uOpacity;
+            uniform vec2 uBackgroundExtent;
+            attribute vec3 aStyle;
+            #ifdef CROWN
+              attribute vec3 aScatter;
+            #endif
+            varying float vBrightness;
+            varying float vWarmth;
+
+            void main() {
+              float phase = aStyle.z;
+              float speed = .55 + fract(phase * 2.79) * 1.45;
+              float pulse = sin(uTime * speed + phase);
+              float shimmer = .64 + .36 * pow(.5 + .5 * pulse, 2.);
+              float brightness = aStyle.y * uOpacity * shimmer;
+              vec3 p = position;
+
+              #ifdef CROWN
+                p = mix(p, aScatter, uScatter);
+                // Focus particles remain behind the camera-facing frame as the tree turns.
+                vec3 retreat = aScatter * 1.08;
+                p = mix(p, retreat, uFocus);
+                p.y += .085 * pulse;
+                brightness *= 1. - .49 * uFocus;
+              #elif defined(BACKGROUND)
+                p.xy *= uBackgroundExtent * (50. - p.z);
+                p.y += 2.;
+                float drift = mix(.24, 1.2, smoothstep(-56., 12., p.z));
+                p.xy += drift * vec2(sin(uTime * .17 * speed + phase),
+                                     cos(uTime * .24 * speed + phase));
+              #elif defined(RINGS)
+                float radius = length(p.xz);
+                float wave = .5 + .5 * cos(radius * .78 - uTime * 1.4);
+                p.xz *= 1. + .011 * sin(uTime * .95 - radius * .42);
+                p.y += .07 * sin(uTime * .83 + phase);
+                brightness = aStyle.y * uOpacity * (.47 + .42 * wave + .11 * pulse);
+              #elif defined(RIBBON)
+                brightness = aStyle.y * uOpacity * (.83 + .17 * sin(uTime * 1.35 - p.y * .73));
+              #endif
+
+              #ifdef RAYS
+                vec4 view = modelViewMatrix * vec4(0., 0., 0., 1.);
+                view.xy += p.xy * length(modelViewMatrix[0].xyz);
+                view.z += .25;
+              #else
+                vec4 view = modelViewMatrix * vec4(p, 1.);
+              #endif
+
+              #if defined(CROWN) || defined(RIBBON)
+                vec3 outward = normalize(vec3(position.x + .0001, .08, position.z));
+                vec3 normal = normalize(mat3(modelViewMatrix) * outward);
+                float facing = dot(normal, normalize(-view.xyz));
+                float facingLight = mix(.44, 1., smoothstep(-.65, .7, facing));
+                brightness *= mix(facingLight, 1., max(uScatter, uFocus));
+                vWarmth = smoothstep(-.68, .66, normal.x);
+              #else
+                vWarmth = .58 + .26 * sin(phase);
+              #endif
+
+              gl_Position = projectionMatrix * view;
+              gl_PointSize = clamp(aStyle.x * 51. / max(1., -view.z), 1., 6.) * uPixelRatio;
+              vBrightness = brightness;
+            }
+          `,
+          fragmentShader: `
+            varying float vBrightness;
+            varying float vWarmth;
+
+            void main() {
+              float r = distance(gl_PointCoord, vec2(.5));
+              float halo = 1. - smoothstep(.07, .49, r);
+              float core = 1. - smoothstep(.03, .24, r);
+              vec3 gold = mix(vec3(1., .82, .51), vec3(1., .59, .22), vWarmth);
+              gl_FragColor = vec4(gold + core * vec3(.49, .46, .37), halo * vBrightness);
+            }
+          `
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.frustumCulled = false;
+        lightClouds.push({ geometry, count, drawOnSmallScreen });
+        return points;
       }
-      const dustGeometry = new THREE.BufferGeometry();
-      dustGeometry.setAttribute("position", new THREE.BufferAttribute(dustPosition, 3));
-      dustGeometry.setAttribute("style", new THREE.BufferAttribute(dustStyle, 2));
-      const dustMaterial = new THREE.ShaderMaterial({
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        uniforms: { uTime: { value: 0 }, uPixelRatio: { value: 1 } },
-        vertexShader: `
-          uniform float uTime;
-          uniform float uPixelRatio;
-          attribute vec2 style;
-          varying float brightness;
 
-          void main() {
-            vec3 positionWithDrift = position;
-            positionWithDrift.x += sin(uTime * .35 + style.y) * .4;
-            positionWithDrift.y += cos(uTime * .48 + style.y) * .45;
-            vec4 view = modelViewMatrix * vec4(positionWithDrift, 1.);
-            gl_Position = projectionMatrix * view;
-            gl_PointSize = clamp((48. + 140. * style.x) / -view.z, 1., 6.) * uPixelRatio;
-            brightness = style.x * (.58 + .42 * sin(uTime * 1.4 + style.y));
-          }
-        `,
-        fragmentShader: `
-          varying float brightness;
+      const backgroundStars = makeLightCloud(DUST_COUNT, () => {
+        const z = rand(-56, 10);
+        const near = (z + 56) / 66;
+        const bright = Math.random() < .075;
+        return {
+          point: new THREE.Vector3(rand(-1, 1), rand(-1, 1), z),
+          size: bright ? rand(2.7, 4.7) : rand(1.05, 2.35) * (.95 + near * .22),
+          brightness: bright ? rand(.62, .94) : rand(.19, .59)
+        };
+      }, "BACKGROUND");
+      scene.add(backgroundStars);
 
-          void main() {
-            float radius = distance(gl_PointCoord, vec2(.5));
-            float glow = 1. - smoothstep(.02, .5, radius);
-            float core = 1. - smoothstep(.0, .2, radius);
-            gl_FragColor = vec4(vec3(1., .64, .23) + core * vec3(.7, .58, .38),
-                                glow * brightness * .73);
-          }
-        `
-      });
-      const dust = new THREE.Points(dustGeometry, dustMaterial);
-      scene.add(dust);
+      const crown = makeLightCloud(14500, () => {
+        const t = 1 - Math.sqrt(1 - Math.random());
+        const angle = rand(0, TAU);
+        const thickness = Math.random() < .78 ? rand(.88, 1.045) : rand(.18, .91);
+        const point = treePosition(t, angle, thickness);
+        point.y += rand(-.13, .13);
+        const bright = Math.random() < .07;
+        return {
+          point,
+          size: bright ? rand(2.35, 3.65) : rand(1.05, 2.05),
+          brightness: bright ? rand(.72, .97) : rand(.23, .66)
+        };
+      }, "CROWN", 10400);
+      mainGroup.add(crown);
+
+      const ribbon = makeLightCloud(2300, (i) => {
+        // Interleave height samples so a lower draw count still covers all turns.
+        const t = .025 + ((i * .61803398875) % 1) * .944;
+        const angle = t * TAU * 5.65 + .53;
+        const point = treePosition(t, angle, 1.076 + rand(-.019, .022));
+        point.y += .085 + rand(-.06, .06);
+        return { point, size: rand(1.35, 2.55), brightness: rand(.39, .82) };
+      }, "RIBBON", 1600);
+      mainGroup.add(ribbon);
+
+      const groundRings = makeLightCloud(9700, (i) => {
+        const ring = i % 3;
+        const radius = [8.8, 13.1, 18.1][ring];
+        const angle = rand(0, TAU);
+        const distance = radius + rand(-.57, .57) + rand(-.48, .48) * (ring + 1);
+        return {
+          point: new THREE.Vector3(Math.cos(angle) * distance, TREE_BASE - .44 + rand(-.13, .13),
+            Math.sin(angle) * distance),
+          size: rand(.9, 1.95),
+          brightness: rand(.24, .68) * (1 - ring * .15)
+        };
+      }, "RINGS", 6900);
+      scene.add(groundRings);
+
+      const starRays = makeLightCloud(530, (i) => {
+        const ray = i % 11;
+        const angle = ray * TAU / 11 + .13;
+        const length = ray % 3 === 0 ? 2.03 : 1.43;
+        const distance = .23 + Math.random() * length;
+        const offset = rand(-.035, .035);
+        return {
+          point: new THREE.Vector3(Math.cos(angle) * distance - Math.sin(angle) * offset,
+            Math.sin(angle) * distance + Math.cos(angle) * offset, 0),
+          size: rand(1.25, 2.45),
+          brightness: rand(.36, .82) * (1 - .55 * distance / length)
+        };
+      }, "RAYS");
+      star.add(starRays);
 
       function makeDefaultPhoto() {
         const canvas = document.createElement("canvas");
@@ -606,14 +746,23 @@
         status.hidden = !message;
       }
 
+      function movePhotoTo(particle, parent) {
+        parent.attach(particle.object);
+        particle.position.copy(particle.object.position);
+        particle.rotation.copy(particle.object.quaternion);
+        particle.scale = particle.object.scale.x;
+      }
+
       function setMode(mode) {
-        STATE.mode = mode;
+        if (STATE.mode === MODES.FOCUS) movePhotoTo(STATE.focus, mainGroup);
         if (mode === MODES.FOCUS) {
           const candidates = photos.filter(particle =>
             particle.type === "PHOTO" && (photos.length === 1 || particle !== STATE.focus)
           );
           STATE.focus = candidates[Math.floor(Math.random() * candidates.length)];
+          movePhotoTo(STATE.focus, scene);
         }
+        STATE.mode = mode;
         for (const button of modeButtons) {
           button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
         }
@@ -654,6 +803,7 @@
       let stream = null;
       let previousVideoTime = -1;
       let previousInference = -Infinity;
+      const gestureTransition = { candidate: null, since: 0, latched: null, releasedSince: null };
 
       async function loadHandLandmarker() {
         const { FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision");
@@ -676,6 +826,7 @@
         stream = null;
         STATE.gesture.detected = false;
         STATE.gesture.name = null;
+        Object.assign(gestureTransition, { candidate: null, latched: null, releasedSince: null });
         cameraButton.textContent = "Enable camera";
         cameraButton.setAttribute("aria-pressed", "false");
       }
@@ -719,41 +870,95 @@
       cameraButton.addEventListener("click", toggleCamera);
       window.addEventListener("pagehide", stopCamera);
 
-      const fingertipIndices = [8, 12, 16, 20];
+      const fingerBases = [5, 9, 13, 17];
+      const handVector = (a, b) => new THREE.Vector3(a.x - b.x, a.y - b.y, a.z - b.z);
 
-      function processGestures(landmarks) {
-        if (!landmarks) {
-          STATE.gesture.detected = false;
-          STATE.gesture.name = null;
-          return;
+      function flexion(a, joint, b) {
+        const proximal = handVector(joint, a);
+        const distal = handVector(b, joint);
+        if (proximal.lengthSq() < 1e-10 || distal.lengthSq() < 1e-10) return NaN;
+        return proximal.angleTo(distal);
+      }
+
+      function classifyHand(world) {
+        if (world?.length !== 21 ||
+            !world.every(point => [point?.x, point?.y, point?.z].every(Number.isFinite))) return undefined;
+        const palmWidth = handVector(world[5], world[17]).length();
+        if (palmWidth < 1e-4) return undefined;
+        const palm = new THREE.Vector3(world[0].x, world[0].y, world[0].z);
+        for (const base of fingerBases) {
+          const { x, y, z } = world[base];
+          palm.x += x;
+          palm.y += y;
+          palm.z += z;
         }
-        const wrist = landmarks[0];
-        const thumb = landmarks[4];
-        const index = landmarks[8];
-        const palm = landmarks[9];
-        const pinchDistance = Math.hypot(thumb.x - index.x, thumb.y - index.y);
-        const fingerDistance = fingertipIndices.reduce((sum, tipIndex) => {
-          const tip = landmarks[tipIndex];
-          return sum + Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
-        }, 0) / fingertipIndices.length;
+        palm.multiplyScalar(.2);
 
-        let gestureMode = null;
-        if (pinchDistance < .05) gestureMode = MODES.FOCUS;
-        else if (fingerDistance < .25) gestureMode = MODES.TREE;
-        else if (fingerDistance > .4) gestureMode = MODES.SCATTER;
+        const fingers = fingerBases.map(base => {
+          const [mcp, pip, dip, tip] = world.slice(base, base + 4);
+          const pipBend = flexion(mcp, pip, dip);
+          const dipBend = flexion(pip, dip, tip);
+          const tipToPalm = handVector(tip, palm).length() / palmWidth;
+          const contracted = handVector(tip, mcp).length() < handVector(pip, mcp).length() + .24 * palmWidth;
+          return {
+            curled: pipBend > .59 && tipToPalm < 1.12 && contracted,
+            extended: pipBend < .43 && dipBend < .55 && tipToPalm > 1.02
+          };
+        });
 
-        STATE.gesture.x = palm.x;
-        STATE.gesture.y = palm.y;
-        STATE.gesture.detected = true;
-        if (gestureMode && (gestureMode !== STATE.gesture.name || STATE.mode !== gestureMode)) {
-          setMode(gestureMode);
+        if (fingers.every(finger => finger.curled)) return MODES.TREE;
+        const pinchDistance = handVector(world[4], world[8]).length() / palmWidth;
+        if (pinchDistance < .31 && !fingers[0].curled && fingers.slice(1).some(finger => finger.extended)) {
+          return MODES.FOCUS;
         }
-        STATE.gesture.name = gestureMode;
+        if (fingers.every(finger => finger.extended) && pinchDistance > .48) return MODES.SCATTER;
+        return null;
+      }
+
+      function updateGestureTransition(gesture, handVisible, now, frameGap) {
+        const state = gestureTransition;
+        if (!handVisible || frameGap > 140) {
+          state.candidate = null;
+          state.releasedSince = null;
+          if (!handVisible) return null;
+        }
+        if (state.latched && gesture !== state.latched) {
+          state.releasedSince ??= now;
+          if (now - state.releasedSince >= 125) state.latched = null;
+        } else {
+          state.releasedSince = null;
+        }
+        if (gesture !== state.candidate) {
+          state.candidate = gesture;
+          state.since = now;
+        }
+        const confirmationMs = gesture === MODES.TREE ? 170 : 125;
+        if (!gesture || gesture === state.latched || now - state.since < confirmationMs) return null;
+        state.latched = gesture;
+        state.releasedSince = null;
+        return gesture;
+      }
+
+      function processGestures(result, now, frameGap) {
+        const palm = result.landmarks[0]?.[9];
+        const visible = Boolean(palm && Number.isFinite(palm.x) && Number.isFinite(palm.y));
+        const gesture = visible ? classifyHand(result.worldLandmarks?.[0]) : null;
+        const state = STATE.gesture;
+        if (visible) {
+          state.x = palm.x;
+          state.y = palm.y;
+        }
+        state.detected = visible;
+        const trackable = visible && gesture !== undefined;
+        const confirmed = updateGestureTransition(gesture, trackable, now, frameGap);
+        state.name = trackable ? gestureTransition.latched : null;
+        if (confirmed && (confirmed !== STATE.mode || confirmed === MODES.FOCUS)) setMode(confirmed);
       }
 
       function detectHand(now) {
         if (!stream || !handLandmarker || video.readyState < 2 ||
             now - previousInference < 42 || video.currentTime === previousVideoTime) return;
+        const frameGap = now - previousInference;
         previousInference = now;
         previousVideoTime = video.currentTime;
 
@@ -766,7 +971,7 @@
             cropWidth, cropHeight, 0, 0, visionFrame.width, visionFrame.height
           );
           const result = handLandmarker.detectForVideo(visionFrame, now);
-          processGestures(result.landmarks[0]);
+          processGestures(result, now, frameGap);
         } catch (error) {
           stopCamera();
           handLandmarker.close();
@@ -783,18 +988,89 @@
         return THREE.MathUtils.radToDeg(2 * Math.atan(Math.max(vertical, horizontal / camera.aspect)));
       }
 
+      function updateProjection() {
+        camera.updateProjectionMatrix();
+        // Overscan leaves room for stars to drift at the edges on every screen.
+        const vertical = 1.28 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+        backgroundExtent.value.set(vertical * camera.aspect, vertical);
+      }
+
+      const view = { yaw: .24, pitch: 0, pointer: null, handAnchor: null, resumeAt: 0 };
+      const limitPitch = value => THREE.MathUtils.clamp(value, -.32, .32);
+
+      stage.addEventListener("pointerdown", event => {
+        if (!event.isPrimary || event.button !== 0 || view.pointer) return;
+        stage.setPointerCapture(event.pointerId);
+        view.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+        view.handAnchor = null;
+        stage.classList.add("dragging");
+      });
+
+      stage.addEventListener("pointermove", event => {
+        const pointer = view.pointer;
+        if (pointer?.id !== event.pointerId) return;
+        view.yaw += (event.clientX - pointer.x) * TAU / Math.max(420, stage.clientWidth * .73);
+        view.pitch = limitPitch(view.pitch + (event.clientY - pointer.y) * .004);
+        pointer.x = event.clientX;
+        pointer.y = event.clientY;
+      });
+
+      function finishDrag(event) {
+        if (view.pointer?.id !== event.pointerId) return;
+        view.pointer = null;
+        view.resumeAt = performance.now() + 2000;
+        stage.classList.remove("dragging");
+      }
+      for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+        stage.addEventListener(type, finishDrag);
+      }
+
+      function updateView(now, motionDelta, blend) {
+        const gesture = STATE.gesture;
+        if (!view.pointer && gesture.detected) {
+          view.handAnchor ??= { x: gesture.x, y: gesture.y, yaw: view.yaw, pitch: view.pitch };
+          const anchor = view.handAnchor;
+          view.yaw = anchor.yaw + (anchor.x - gesture.x) * 3.05;
+          view.pitch = limitPitch(anchor.pitch + (gesture.y - anchor.y) * .92);
+        } else {
+          view.handAnchor = null;
+          if (!view.pointer && now >= view.resumeAt) view.yaw += motionDelta * .14;
+        }
+
+        mainGroup.rotation.x = THREE.MathUtils.lerp(mainGroup.rotation.x, view.pitch, blend);
+        mainGroup.rotation.y = THREE.MathUtils.lerp(mainGroup.rotation.y, view.yaw, blend);
+      }
+
+      function updateLightClouds(blend, elapsed) {
+        const scatter = STATE.mode === MODES.SCATTER;
+        const focus = STATE.mode === MODES.FOCUS;
+        treeBlend.scatter = THREE.MathUtils.lerp(treeBlend.scatter, Number(scatter), blend);
+        treeBlend.focus = THREE.MathUtils.lerp(treeBlend.focus, Number(focus), blend);
+        treeBlend.trim = THREE.MathUtils.lerp(treeBlend.trim, Number(!scatter && !focus), blend);
+        crown.material.uniforms.uScatter.value = treeBlend.scatter;
+        crown.material.uniforms.uFocus.value = treeBlend.focus;
+        for (const trim of [ribbon, groundRings, starRays]) {
+          trim.material.uniforms.uOpacity.value = treeBlend.trim;
+          trim.visible = treeBlend.trim > .004;
+        }
+        pointTime.value = elapsed;
+      }
+
       function resize() {
         const width = Math.max(1, innerWidth);
         const height = Math.max(1, innerHeight);
         const pixelRatio = Math.min(devicePixelRatio || 1, 1.75);
         camera.aspect = width / height;
         camera.fov = framingFov();
-        camera.updateProjectionMatrix();
+        updateProjection();
         renderer.setPixelRatio(pixelRatio);
         renderer.setSize(width, height);
         composer.setPixelRatio(pixelRatio);
         composer.setSize(width, height);
-        dustMaterial.uniforms.uPixelRatio.value = pixelRatio;
+        pointPixelRatio.value = pixelRatio * THREE.MathUtils.clamp(height / 720, .75, 1.25);
+        for (const { geometry, count, drawOnSmallScreen } of lightClouds) {
+          geometry.setDrawRange(0, width <= 600 ? drawOnSmallScreen : count);
+        }
       }
       window.addEventListener("resize", resize);
       resize();
@@ -812,25 +1088,13 @@
         const fov = framingFov();
         if (Math.abs(fov - camera.fov) > .001) {
           camera.fov = THREE.MathUtils.lerp(camera.fov, fov, blend);
-          camera.updateProjectionMatrix();
+          updateProjection();
         }
-        const gesture = STATE.gesture;
-        const turnX = gesture.detected ? (gesture.y - .5) * .78 : 0;
-        const turnY = gesture.detected ? (.5 - gesture.x) * 1.65 : Math.sin(elapsed * .29) * .22;
-        mainGroup.rotation.x = THREE.MathUtils.lerp(mainGroup.rotation.x, turnX, blend);
-        mainGroup.rotation.y = THREE.MathUtils.lerp(mainGroup.rotation.y, turnY, blend);
-
-        if (STATE.mode === MODES.FOCUS) {
-          mainGroup.updateMatrixWorld(true);
-          focusPosition.copy(cameraFront);
-          mainGroup.worldToLocal(focusPosition);
-          mainGroup.getWorldQuaternion(inverseRoot).invert();
-          focusRotation.copy(inverseRoot).multiply(camera.quaternion);
-        }
+        updateView(now, motionDelta, 1 - Math.exp(-(view.pointer ? 16 : 7) * delta));
 
         for (const particle of particles) particle.update(motionDelta, blend, elapsed);
         for (const batch of batches) batch.instanceMatrix.needsUpdate = true;
-        dustMaterial.uniforms.uTime.value = elapsed;
+        updateLightClouds(blend, elapsed);
         composer.render();
         requestAnimationFrame(animate);
       }
