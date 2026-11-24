@@ -94,6 +94,17 @@
     #sharing-note { margin: 0; color: #e4d8b5; font-size: 14px; }
     #upload-button:disabled { cursor: progress; opacity: .7; }
     #hide-hint, #status { margin: 0; font-size: 13px; color: #e4d8b5; }
+    #photo-pages { display: flex; justify-content: center; flex-wrap: wrap; gap: 5px 10px; align-items: center; }
+    #photo-pages[hidden] { display: none; }
+    #photo-pages button {
+      border: 1px solid #d4af375c;
+      border-radius: 3px;
+      padding: 4px 10px;
+      background: #090806da;
+      font-size: 14px;
+    }
+    #photo-pages button:disabled { opacity: .55; }
+    #photo-page-status { color: #e4d8b5; font-size: 13px; }
     .mode-controls {
       display: flex;
       justify-content: center;
@@ -182,11 +193,17 @@
     <section class="scene-controls" aria-label="Scene controls">
       <p id="status" role="status" hidden></p>
       <div class="upload-wrapper">
-        <button type="button" id="upload-button">ADD MEMORIES</button>
+        <button type="button" id="upload-button" aria-describedby="sharing-note">ADD MEMORIES</button>
         <input id="photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden>
-        <p id="sharing-note">所选照片会发送给网站创建者。</p>
+        <p id="sharing-note">上传后，任何打开网站的人都能看到这张照片。</p>
         <p id="hide-hint">Press 'H' to Hide Controls</p>
       </div>
+      <nav id="photo-pages" aria-label="共享照片分页" hidden>
+        <button type="button" id="latest-photos" hidden>回到最新</button>
+        <button type="button" id="older-photos" hidden>更早一批</button>
+        <button type="button" id="retry-photos" hidden>重试加载</button>
+        <span id="photo-page-status" role="status"></span>
+      </nav>
       <div class="mode-controls" role="group" aria-label="Display mode and camera">
         <button type="button" data-mode="TREE" aria-pressed="true" title="Fist · 1">Tree</button>
         <button type="button" data-mode="SCATTER" aria-pressed="false" title="Open hand · 2">Scatter</button>
@@ -858,6 +875,12 @@
         particle.targetRotation.copy(particle.treeRotation);
         particle.rotation.copy(particle.treeRotation);
         particle.writeTransform();
+        particle.releasePhoto = () => {
+          group.removeFromParent();
+          image.geometry.dispose();
+          image.material.dispose();
+          texture.dispose();
+        };
         photos.push(particle);
         particles.push(particle);
         mainGroup.add(group);
@@ -878,12 +901,9 @@
       }
 
       function setMode(mode) {
-        if (STATE.mode === MODES.FOCUS) movePhotoTo(STATE.focus, mainGroup);
+        if (STATE.mode === MODES.FOCUS && STATE.focus) movePhotoTo(STATE.focus, mainGroup);
         if (mode === MODES.FOCUS) {
-          const candidates = photos.filter(particle =>
-            particle.type === "PHOTO" && (photos.length === 1 || particle !== STATE.focus)
-          );
-          STATE.focus = candidates[Math.floor(Math.random() * candidates.length)];
+          STATE.focus = photos[(photos.indexOf(STATE.focus) + 1) % photos.length];
           movePhotoTo(STATE.focus, scene);
         }
         STATE.mode = mode;
@@ -895,6 +915,96 @@
       const photoInput = document.querySelector("#photo-input");
       const uploadButton = document.querySelector("#upload-button");
       const uploadTicket = document.querySelector('meta[name="upload-ticket"]').content;
+      const pageControls = document.querySelector("#photo-pages");
+      const latestPhotos = document.querySelector("#latest-photos");
+      const olderPhotos = document.querySelector("#older-photos");
+      const retryPhotos = document.querySelector("#retry-photos");
+      const pageStatus = document.querySelector("#photo-page-status");
+      const photoId = /^[0-9]{13}-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+      const gallery = { cursor: null, next: null, retry: undefined, loading: false, uploading: false, message: "" };
+
+      function updatePhotoControls() {
+        latestPhotos.hidden = gallery.cursor === null;
+        olderPhotos.hidden = gallery.next === null;
+        retryPhotos.hidden = gallery.retry === undefined;
+        pageControls.hidden = latestPhotos.hidden && olderPhotos.hidden && retryPhotos.hidden && !gallery.message;
+        pageStatus.textContent = gallery.message;
+        const busy = gallery.loading || gallery.uploading;
+        for (const control of [uploadButton, latestPhotos, olderPhotos, retryPhotos]) control.disabled = busy;
+      }
+
+      function replacePhotoBatch(textures) {
+        for (const particle of photos) {
+          particle.releasePhoto();
+          particles.splice(particles.indexOf(particle), 1);
+        }
+        photos.length = 0;
+        STATE.focus = null;
+        for (const texture of textures.length ? textures : [makeDefaultPhoto()]) addPhotoToScene(texture);
+        if (STATE.mode === MODES.FOCUS) setMode(MODES.FOCUS);
+      }
+
+      async function loadSharedTexture(id) {
+        const image = new Image();
+        image.src = "/api/shared-photos/" + id;
+        await image.decode();
+        const maxSize = innerWidth <= 600 ? 768 : 1024;
+        const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+        return canvasTexture(canvas);
+      }
+
+      async function loadPhotoPage(cursor = null) {
+        if (gallery.loading) return false;
+        gallery.loading = true;
+        gallery.message = "正在加载共享照片…";
+        updatePhotoControls();
+        try {
+          const query = cursor === null ? "" : "?after=" + encodeURIComponent(cursor);
+          const response = await fetch("/api/shared-photos" + query, { cache: "no-store" });
+          if (!response.ok) throw new Error("Shared photos unavailable");
+          const page = await response.json();
+          if (!Array.isArray(page.photos) || page.photos.length > 12 ||
+              page.photos.some(item => typeof item?.id !== "string" || !photoId.test(item.id)) ||
+              (page.next !== null && (typeof page.next !== "string" || !page.next || page.next.length > 2048))) {
+            throw new Error("Invalid shared photo page");
+          }
+          const textures = [];
+          for (let start = 0; start < page.photos.length; start += 3) {
+            const results = await Promise.allSettled(page.photos.slice(start, start + 3)
+              .map(item => loadSharedTexture(item.id)));
+            for (const result of results) {
+              if (result.status === "fulfilled") textures.push(result.value);
+            }
+          }
+          if (page.photos.length && !textures.length) throw new Error("Shared images unavailable");
+          replacePhotoBatch(textures);
+          gallery.cursor = cursor;
+          gallery.next = page.next;
+          const incomplete = textures.length !== page.photos.length;
+          gallery.retry = incomplete ? cursor : undefined;
+          gallery.message = incomplete ? "部分照片未加载。" : "";
+          return !incomplete;
+        } catch {
+          gallery.retry = cursor;
+          gallery.message = "共享照片暂时无法加载。";
+          return false;
+        } finally {
+          gallery.loading = false;
+          updatePhotoControls();
+        }
+      }
+
+      latestPhotos.addEventListener("click", () => loadPhotoPage());
+      olderPhotos.addEventListener("click", () => {
+        if (gallery.next !== null) loadPhotoPage(gallery.next);
+      });
+      retryPhotos.addEventListener("click", () => {
+        if (gallery.retry !== undefined) loadPhotoPage(gallery.retry);
+      });
       uploadButton.addEventListener("click", () => photoInput.click());
 
       async function preparePhoto(file) {
@@ -916,7 +1026,7 @@
           ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
           const jpeg = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", .84));
           if (!jpeg) throw new Error("无法处理此照片。");
-          return { jpeg, canvas };
+          return jpeg;
         } finally {
           URL.revokeObjectURL(url);
         }
@@ -930,15 +1040,16 @@
           setStatus("每次最多选择 6 张照片。");
           return;
         }
-        uploadButton.disabled = true;
-        setStatus("正在发送照片…");
+        gallery.uploading = true;
+        updatePhotoControls();
+        setStatus("正在挂上照片…");
         let sent = 0;
         let failure = "";
         try {
           for (const file of files) {
             try {
-              const { jpeg, canvas } = await preparePhoto(file);
-              const response = await fetch("/api/photos", {
+              const jpeg = await preparePhoto(file);
+              const response = await fetch("/api/shared-photos", {
                 method: "POST",
                 headers: { "Content-Type": "image/jpeg", "X-Upload-Ticket": uploadTicket },
                 body: jpeg
@@ -948,15 +1059,16 @@
                 throw new Error(receipt?.error ?? "发送失败，请稍后重试。");
               }
               sent++;
-              addPhotoToScene(canvasTexture(canvas));
             } catch (error) {
-              failure = error.message || "发送失败，请稍后重试。";
+              failure = error.message || "上传失败，请稍后重试。";
             }
           }
-          setStatus(failure ? (sent ? `已发送 ${sent}/${files.length} 张。${failure}` : failure)
-            : `已发送 ${sent} 张照片，并挂到树上。`);
+          const refreshed = sent ? await loadPhotoPage() : false;
+          setStatus(failure ? (sent ? `已公开 ${sent}/${files.length} 张。${failure}` : failure)
+            : (refreshed ? `已挂上 ${sent} 张照片，大家都能看到。` : `已公开 ${sent} 张照片。请重试加载树上的照片。`));
         } finally {
-          uploadButton.disabled = false;
+          gallery.uploading = false;
+          updatePhotoControls();
         }
       });
 
@@ -1374,6 +1486,7 @@
 
       animate(previousFrame);
       loader.classList.add("loaded");
+      loadPhotoPage();
     }
 
     init().catch((error) => {

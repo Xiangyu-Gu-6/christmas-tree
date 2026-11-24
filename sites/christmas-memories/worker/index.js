@@ -2,6 +2,10 @@ const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
 const PHOTOS_PER_HOUR = 24;
 const TICKET_SECONDS = 12 * 60 * 60;
 const PHOTO_KEY = /^photos\/[0-9]{8}\/[a-f0-9]{32}\/[0-9]{2}\.jpg$/;
+const SHARED_BODY_KEY = /^shared-photos\/[0-9]{8}\/[a-f0-9]{32}\/[0-9]{2}\.jpg$/;
+const SHARED_INDEX = "shared-index/";
+const SHARED_ID = /^[0-9]{13}-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+const SHARED_PAGE_SIZE = 12;
 const encoder = new TextEncoder();
 const securityHeaders = {
   "Cache-Control": "no-store",
@@ -32,7 +36,8 @@ async function readTicket(key, ticket) {
   const match = /^([a-f0-9-]{36})\.(\d{10})\.([a-f0-9]{64})$/.exec(ticket ?? "");
   if (!match || Number(match[2]) < Date.now() / 1000) return null;
   const signature = Uint8Array.from(match[3].match(/../g), pair => parseInt(pair, 16));
-  const valid = await crypto.subtle.verify("HMAC", key, signature, encoder.encode(match[1] + "." + match[2]));
+  const valid = await crypto.subtle.verify("HMAC", key, signature,
+    encoder.encode("shared:" + match[1] + "." + match[2]));
   return valid ? match[1] : null;
 }
 
@@ -81,7 +86,7 @@ async function upload(request, env, key, origin) {
   const identity = address ? "address:" + address : "ticket:" + visitor;
   const fingerprint = hex(await signedValue(key, identity)).slice(0, 32);
   const reverseHour = String(99999999 - Math.floor(Date.now() / 3600000)).padStart(8, "0");
-  const prefix = `photos/${reverseHour}/${fingerprint}/`;
+  const prefix = `shared-photos/${reverseHour}/${fingerprint}/`;
   const { objects } = await env.BUCKET.list({ prefix, limit: PHOTOS_PER_HOUR });
   const used = new Set(objects.map(photo => photo.key));
 
@@ -93,9 +98,53 @@ async function upload(request, env, key, origin) {
       onlyIf: new Headers({ "If-None-Match": "*" }),
       httpMetadata: { contentType: "image/jpeg" }
     });
-    if (stored) return json({ saved: true }, 201);
+    if (stored) {
+      // Keep quota slots separate from the chronological public index.
+      const timestamp = String(9999999999999 - stored.uploaded.getTime()).padStart(13, "0");
+      const id = timestamp + "-" + crypto.randomUUID();
+      const indexKey = SHARED_INDEX + id;
+      try {
+        await env.BUCKET.put(indexKey, "", { customMetadata: { photoKey: name } });
+      } catch (error) {
+        // Check the index before rolling back in case the write succeeded before an error.
+        if ((await env.BUCKET.head(indexKey))?.customMetadata?.photoKey !== name) {
+          await env.BUCKET.delete(name);
+          throw error;
+        }
+      }
+      return json({ saved: true, id }, 201);
+    }
   }
   return json({ error: "发送次数过多，请稍后再试。" }, 429);
+}
+
+async function sharedPage(env, url) {
+  const after = url.searchParams.get("after");
+  if (after !== null && (!after || after.length > 2048)) return json({ error: "无效的分页链接。" }, 400);
+  const page = await env.BUCKET.list({
+    prefix: SHARED_INDEX,
+    cursor: after ?? undefined,
+    limit: SHARED_PAGE_SIZE
+  });
+  const ids = page.objects.map(entry => entry.key.slice(SHARED_INDEX.length));
+  return json({
+    photos: ids.filter(id => SHARED_ID.test(id)).map(id => ({ id })),
+    next: page.truncated ? page.cursor : null
+  });
+}
+
+function jpegResponse(photo) {
+  if (!photo) return new Response("未找到照片。", { status: 404, headers: securityHeaders });
+  return new Response(photo.body, {
+    headers: { ...securityHeaders, "Content-Type": "image/jpeg", "Content-Length": String(photo.size) }
+  });
+}
+
+async function sharedPhoto(env, id) {
+  if (!SHARED_ID.test(id)) return jpegResponse(null);
+  const entry = await env.BUCKET.head(SHARED_INDEX + id);
+  const key = entry?.customMetadata?.photoKey ?? "";
+  return jpegResponse(SHARED_BODY_KEY.test(key) ? await env.BUCKET.get(key) : null);
 }
 
 function inboxPage(body) {
@@ -122,7 +171,7 @@ figcaption{padding:8px 12px;color:#e2cfab;font-size:14px}
 .more{display:inline-block;margin-top:24px}
 </style>
 </head>
-<body><header><h1>照片收件箱</h1><nav><a href="/">圣诞树</a><a href="/admin">刷新</a></nav></header>
+<body><header><h1>私密照片存档</h1><nav><a href="/">圣诞树</a><a href="/admin">刷新</a></nav></header>
 <main>${body}</main></body></html>`, 200, {
     "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     "X-Robots-Tag": "noindex, nofollow"
@@ -151,11 +200,7 @@ async function admin(request, env, url) {
   if (url.pathname === "/admin/photo") {
     const key = url.searchParams.get("id") ?? "";
     if (!PHOTO_KEY.test(key)) return new Response("未找到照片。", { status: 404, headers: securityHeaders });
-    const photo = await env.BUCKET.get(key);
-    if (!photo) return new Response("未找到照片。", { status: 404, headers: securityHeaders });
-    return new Response(photo.body, {
-      headers: { ...securityHeaders, "Content-Type": "image/jpeg", "Content-Length": String(photo.size) }
-    });
+    return jpegResponse(await env.BUCKET.get(key));
   }
 
   const cursor = url.searchParams.get("cursor") || undefined;
@@ -175,7 +220,7 @@ async function admin(request, env, url) {
   const more = recent.truncated && recent.cursor
     ? `<a class="more" href="/admin?cursor=${encodeURIComponent(recent.cursor)}">查看更多</a>` : "";
   return inboxPage(cards ? `<section class="photos" aria-label="收到的照片">${cards}</section>${more}`
-    : "<p>还没有收到照片。访客发送成功后，刷新这里即可查看。</p>" + more);
+    : "<p>没有以前私密上传的照片。</p>" + more);
 }
 
 export default {
@@ -186,7 +231,15 @@ export default {
       if (request.method === "GET" && (path === "/admin" || path === "/admin/photo")) {
         return await admin(request, env, url);
       }
-      if ((request.method === "GET" && path === "/") || (request.method === "POST" && path === "/api/photos")) {
+      if (request.method === "POST" && path === "/api/photos") {
+        return json({ error: "请刷新页面并确认新的公开分享提示后再上传。" }, 409);
+      }
+      if (request.method === "GET" && (path === "/api/shared-photos" || path.startsWith("/api/shared-photos/"))) {
+        if (!env.BUCKET) return json({ error: "照片服务暂不可用，请稍后再试。" }, 503);
+        if (path === "/api/shared-photos") return await sharedPage(env, url);
+        return await sharedPhoto(env, path.slice("/api/shared-photos/".length));
+      }
+      if ((request.method === "GET" && path === "/") || (request.method === "POST" && path === "/api/shared-photos")) {
         if (!env.BUCKET || !env.UPLOAD_SIGNING_KEY || !env.OWNER_EMAIL) {
           return json({ error: "照片服务暂不可用，请稍后再试。" }, 503);
         }
@@ -195,7 +248,7 @@ export default {
         );
         if (request.method === "POST") return await upload(request, env, signingKey, env.SITE_ORIGIN ?? url.origin);
         const value = crypto.randomUUID() + "." + (Math.floor(Date.now() / 1000) + TICKET_SECONDS);
-        const ticket = value + "." + hex(await signedValue(signingKey, value));
+        const ticket = value + "." + hex(await signedValue(signingKey, "shared:" + value));
         return html(treeHtml.replace("__UPLOAD_TICKET__", ticket), 200, {
           "Permissions-Policy": "camera=(self), microphone=(), geolocation=()"
         });
