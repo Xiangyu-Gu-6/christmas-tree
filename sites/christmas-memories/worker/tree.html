@@ -1,0 +1,1387 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="upload-ticket" content="__UPLOAD_TICKET__">
+  <title>圣诞树 · Merry Christmas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --gold: #d4af37;
+      --cream: #fceea7;
+      background: #000000;
+      color: var(--cream);
+      font-family: "Times New Roman", Times, serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; }
+    #stage, #controls, #loader { position: fixed; inset: 0; }
+    #stage { touch-action: none; cursor: grab; }
+    #stage.dragging { cursor: grabbing; }
+    #stage canvas { display: block; width: 100%; height: 100%; }
+    #controls { pointer-events: none; transition: opacity .35s ease; }
+    #controls.ui-hidden { opacity: 0; pointer-events: none; }
+    #controls.ui-hidden button { pointer-events: none; }
+    .masthead {
+      position: absolute;
+      top: max(25px, env(safe-area-inset-top));
+      left: 12px;
+      right: 12px;
+      text-align: center;
+    }
+    h1 {
+      margin: 0;
+      font: 500 56px/1.12 "Cinzel", Georgia, serif;
+      letter-spacing: .035em;
+      background: linear-gradient(180deg, #fff 7%, #fceea7 59%, #d4af37 98%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 0 18px rgba(212, 175, 55, .43));
+    }
+    .heading-rule {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 11px;
+      margin-top: 8px;
+      color: var(--gold);
+      font-size: 14px;
+    }
+    .heading-rule::before, .heading-rule::after {
+      content: "";
+      width: 50px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #d4af3780);
+    }
+    .heading-rule::after { transform: rotate(180deg); }
+    .scene-controls {
+      position: absolute;
+      bottom: max(20px, env(safe-area-inset-bottom));
+      left: 12px;
+      right: 12px;
+      display: grid;
+      justify-items: center;
+      gap: 10px;
+      text-align: center;
+    }
+    .upload-wrapper { display: grid; justify-items: center; gap: 6px; }
+    button {
+      pointer-events: auto;
+      appearance: none;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:focus-visible { outline: 2px solid var(--cream); outline-offset: 4px; }
+    #upload-button {
+      padding: 11px 18px;
+      border: 1px solid #d4af37ad;
+      border-radius: 3px;
+      background: #26201175;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      font: 600 14px/1.2 "Cinzel", Georgia, serif;
+      letter-spacing: .095em;
+      box-shadow: inset 0 0 15px #d4af3710, 0 0 20px #d4af371d;
+    }
+    #upload-button:hover { background: #51401d90; }
+    #sharing-note { margin: 0; color: #e4d8b5; font-size: 14px; }
+    #upload-button:disabled { cursor: progress; opacity: .7; }
+    #hide-hint, #status { margin: 0; font-size: 13px; color: #e4d8b5; }
+    .mode-controls {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid #d4af374b;
+      border-radius: 5px;
+      background: #090806da;
+    }
+    .mode-controls button {
+      border: 1px solid transparent;
+      border-radius: 3px;
+      padding: 6px 10px;
+      background: transparent;
+      font-size: 14px;
+      color: #dbcead;
+    }
+    .mode-controls button:hover, .mode-controls button[aria-pressed="true"] {
+      color: var(--cream);
+      background: #d4af3727;
+      border-color: #d4af375c;
+    }
+    .mode-controls button:disabled { opacity: .65; cursor: progress; }
+    #status { position: absolute; bottom: calc(100% + 8px); }
+    #webcam {
+      position: fixed;
+      right: 0;
+      bottom: 0;
+      opacity: 0;
+      pointer-events: none;
+      display: grid;
+    }
+    #webcam video, #webcam canvas { width: 160px; height: 120px; }
+    #loader {
+      z-index: 2;
+      display: grid;
+      place-content: center;
+      justify-items: center;
+      gap: 18px;
+      padding: 20px;
+      text-align: center;
+      background: #000000;
+      font: 500 14px/1.6 "Cinzel", Georgia, serif;
+      letter-spacing: .16em;
+      transition: opacity .8s ease, visibility .8s;
+    }
+    #loader.loaded { opacity: 0; visibility: hidden; pointer-events: none; }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 1px solid #d4af372e;
+      border-top: 1px solid #d4af37;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 600px), (max-height: 660px) {
+      .masthead { top: max(14px, env(safe-area-inset-top)); }
+      h1 { font-size: clamp(28px, 7.1vw, 46px); }
+      .scene-controls { gap: 6px; bottom: max(10px, env(safe-area-inset-bottom)); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #loader, #controls { transition-duration: .01s; }
+      .spinner { animation-duration: 3s; }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+        "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm"
+      }
+    }
+  </script>
+</head>
+<body>
+  <main id="stage" aria-label="Interactive 3D Christmas tree. Drag to rotate."></main>
+  <div id="controls">
+    <header class="masthead">
+      <h1>Merry Christmas</h1>
+      <div class="heading-rule" aria-hidden="true">✧</div>
+    </header>
+    <section class="scene-controls" aria-label="Scene controls">
+      <p id="status" role="status" hidden></p>
+      <div class="upload-wrapper">
+        <button type="button" id="upload-button">ADD MEMORIES</button>
+        <input id="photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden>
+        <p id="sharing-note">所选照片会发送给网站创建者。</p>
+        <p id="hide-hint">Press 'H' to Hide Controls</p>
+      </div>
+      <div class="mode-controls" role="group" aria-label="Display mode and camera">
+        <button type="button" data-mode="TREE" aria-pressed="true" title="Fist · 1">Tree</button>
+        <button type="button" data-mode="SCATTER" aria-pressed="false" title="Open hand · 2">Scatter</button>
+        <button type="button" data-mode="FOCUS" aria-pressed="false" title="Pinch · 3">Focus</button>
+        <button type="button" id="camera-button" aria-pressed="false" title="Enable hand gestures">Enable camera</button>
+      </div>
+    </section>
+  </div>
+  <div id="webcam" aria-hidden="true">
+    <video id="video" muted autoplay playsinline></video>
+    <canvas id="vision-frame" width="160" height="120"></canvas>
+  </div>
+  <div id="loader" role="status">
+    <div class="spinner" aria-hidden="true"></div>
+    <div id="loader-message">LOADING HOLIDAY MAGIC</div>
+  </div>
+  <noscript><style>.spinner, #loader-message { display: none; }</style>
+    <div id="loader">Enable JavaScript to see the Christmas tree.</div>
+  </noscript>
+
+  <script type="module">
+    const loader = document.querySelector("#loader");
+
+    async function init() {
+      const [
+        THREE, { RoomEnvironment }, { EffectComposer }, { RenderPass },
+        { UnrealBloomPass }, { OutputPass }
+      ] = await Promise.all([
+        import("three"),
+        import("three/addons/environments/RoomEnvironment.js"),
+        import("three/addons/postprocessing/EffectComposer.js"),
+        import("three/addons/postprocessing/RenderPass.js"),
+        import("three/addons/postprocessing/UnrealBloomPass.js"),
+        import("three/addons/postprocessing/OutputPass.js")
+      ]);
+
+      const MODES = Object.freeze({ TREE: "TREE", SCATTER: "SCATTER", FOCUS: "FOCUS" });
+      const STATE = {
+        mode: MODES.TREE,
+        focus: null,
+        gesture: { name: null, x: .5, y: .5, detected: false }
+      };
+      window.STATE = STATE;
+
+      const stage = document.querySelector("#stage");
+      const controls = document.querySelector("#controls");
+      const status = document.querySelector("#status");
+      const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
+      const cameraButton = document.querySelector("#camera-button");
+      const video = document.querySelector("#video");
+      const visionFrame = document.querySelector("#vision-frame");
+      const visionContext = visionFrame.getContext("2d");
+      const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+      const TAU = Math.PI * 2;
+      const TREE_HEIGHT = 18.9;
+      const TREE_BASE = -6.9;
+      const MAX_RADIUS = 8.4;
+      const DUST_COUNT = 2500;
+      const DEFAULT_CAMERA_DISTANCE = 50;
+      const rand = THREE.MathUtils.randFloat;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000000);
+      const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 150);
+      camera.position.set(0, 2, DEFAULT_CAMERA_DISTANCE);
+      camera.lookAt(0, 2, 0);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.toneMapping = THREE.ReinhardToneMapping;
+      renderer.toneMappingExposure = 2.2;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      stage.appendChild(renderer.domElement);
+
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      const room = new RoomEnvironment();
+      scene.environment = pmrem.fromScene(room, .04).texture;
+      room.dispose();
+      pmrem.dispose();
+
+      const composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      composer.addPass(new UnrealBloomPass(
+        new THREE.Vector2(innerWidth, innerHeight), .45, .4, .7
+      ));
+      composer.addPass(new OutputPass());
+
+      const mainGroup = new THREE.Group();
+      mainGroup.rotation.order = "YXZ";
+      scene.add(mainGroup, new THREE.AmbientLight(0xffffff, .6));
+      const innerLight = new THREE.PointLight(0xff8b34, 2);
+      innerLight.position.set(0, 2, 0);
+      mainGroup.add(innerLight);
+
+      for (const [color, intensity, x, y, z] of [
+        [0xffd17a, 1200, 30, 40, 40],
+        [0x789aff, 600, -30, 20, -30]
+      ]) {
+        const light = new THREE.SpotLight(color, intensity, 0, .65, .45);
+        light.position.set(x, y, z);
+        scene.add(light, light.target);
+      }
+
+      function treePosition(t, angle, thickness = 1) {
+        const radius = MAX_RADIUS * (1 - t) * thickness;
+        return new THREE.Vector3(
+          Math.cos(angle) * radius, TREE_BASE + t * TREE_HEIGHT, Math.sin(angle) * radius
+        );
+      }
+
+      function randomShellPoint() {
+        const y = rand(-1, 1);
+        const angle = rand(0, TAU);
+        const horizontal = Math.sqrt(1 - y * y);
+        const radius = Math.cbrt(rand(8 ** 3, 20 ** 3));
+        return new THREE.Vector3(
+          horizontal * Math.cos(angle), y, horizontal * Math.sin(angle)
+        ).multiplyScalar(radius);
+      }
+
+      const particles = [];
+      const photos = [];
+      const matrix = new THREE.Object3D();
+      const positionTarget = new THREE.Vector3();
+      const cameraFront = new THREE.Vector3(0, 2, 35);
+
+      class Particle {
+        constructor(type, tree, size, batch = null, slot = 0, object = null) {
+          this.type = type;
+          this.tree = tree;
+          this.scatter = randomShellPoint();
+          // Leave an opening in front of the background for the focused frame.
+          this.background = this.scatter.clone().multiplyScalar(1.12);
+          this.background.z -= 8;
+          this.position = tree.clone().multiplyScalar(.84);
+          this.size = size;
+          this.scale = size;
+          this.batch = batch;
+          this.slot = slot;
+          this.object = object;
+          this.phase = rand(0, TAU);
+          this.spin = new THREE.Vector3(rand(-1, 1), rand(-1.5, 1.5), rand(-1, 1));
+          this.angles = new THREE.Euler(rand(-.4, .4), rand(-Math.PI, Math.PI), rand(-.6, .6));
+          this.rotation = new THREE.Quaternion().setFromEuler(this.angles);
+          this.targetRotation = this.rotation.clone();
+          this.treeRotation = this.rotation.clone();
+          this.writeTransform();
+        }
+
+        writeTransform() {
+          const transform = this.object ?? matrix;
+          transform.position.copy(this.position);
+          transform.quaternion.copy(this.rotation);
+          transform.scale.setScalar(this.scale);
+          if (this.batch) {
+            transform.updateMatrix();
+            this.batch.setMatrixAt(this.slot, transform.matrix);
+          }
+        }
+
+        update(delta, blend, elapsed) {
+          let targetScale = this.size;
+          if (STATE.mode === MODES.TREE) {
+            positionTarget.copy(this.tree);
+            positionTarget.y += Math.sin(elapsed * 1.3 + this.phase) * .09;
+            this.targetRotation.copy(this.treeRotation);
+          } else if (STATE.mode === MODES.SCATTER) {
+            positionTarget.copy(this.scatter);
+            positionTarget.y += Math.sin(elapsed * .85 + this.phase) * .35;
+            this.angles.x += this.spin.x * delta;
+            this.angles.y += this.spin.y * delta;
+            this.angles.z += this.spin.z * delta;
+            this.targetRotation.setFromEuler(this.angles);
+          } else if (this === STATE.focus) {
+            positionTarget.copy(cameraFront);
+            targetScale = 4.5;
+            this.targetRotation.copy(camera.quaternion);
+          } else {
+            positionTarget.copy(this.background);
+            targetScale *= .68;
+            this.targetRotation.copy(this.treeRotation);
+          }
+
+          this.position.lerp(positionTarget, blend);
+          this.rotation.slerp(this.targetRotation, blend);
+          this.scale = THREE.MathUtils.lerp(this.scale, targetScale, blend);
+          this.writeTransform();
+        }
+      }
+
+      function canvasTexture(canvas) {
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        return texture;
+      }
+
+      function makeCandyCane() {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 128;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fffaf2";
+        ctx.fillRect(0, 0, 128, 128);
+        ctx.strokeStyle = "#b80e23";
+        ctx.lineWidth = 15;
+        for (let x = -128; x < 128; x += 32) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x + 128, 128);
+          ctx.stroke();
+        }
+        const texture = canvasTexture(canvas);
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(2, 1);
+        const path = [new THREE.Vector3(0, -.95, 0), new THREE.Vector3(0, -.4, 0)];
+        for (let step = 0; step <= 10; step++) {
+          const angle = Math.PI * (1 - step / 10);
+          path.push(new THREE.Vector3(.33 + .33 * Math.cos(angle), .45 + .33 * Math.sin(angle), 0));
+        }
+        path.push(new THREE.Vector3(.66, .26, 0));
+        return {
+          geometry: new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path), 28, .09, 8, false),
+          material: new THREE.MeshPhysicalMaterial({ map: texture, roughness: .27, clearcoat: .36 })
+        };
+      }
+
+      const box = new THREE.BoxGeometry(.64, .64, .64);
+      const sphere = new THREE.SphereGeometry(.39, 12, 9);
+      const candy = makeCandyCane();
+      const styles = [
+        { type: "BOX", count: 19, geometry: box,
+          material: new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: .76, roughness: .27 }) },
+        { type: "BOX", count: 17, geometry: box,
+          material: new THREE.MeshStandardMaterial({ color: 0x124938, metalness: .3, roughness: .4 }) },
+        { type: "SPHERE", count: 34, geometry: sphere,
+          material: new THREE.MeshPhysicalMaterial({
+            color: 0xf6c95b, metalness: .66, roughness: .24, emissive: 0x9a4a08, emissiveIntensity: .16
+          }) },
+        { type: "SPHERE", count: 19, geometry: sphere,
+          material: new THREE.MeshPhysicalMaterial({
+            color: 0xbd1735, metalness: .36, roughness: .28, clearcoat: .9, clearcoatRoughness: .15
+          }) },
+        { type: "CANDY", count: 12, geometry: candy.geometry, material: candy.material }
+      ];
+      const batches = styles.map(({ geometry, material, count }) => {
+        const mesh = new THREE.InstancedMesh(geometry, material, count);
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        mesh.frustumCulled = false;
+        mainGroup.add(mesh);
+        return mesh;
+      });
+      const slots = styles.map(() => 0);
+      const distribution = styles.flatMap(({ count }, index) => Array(count).fill(index));
+      for (let i = distribution.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [distribution[i], distribution[j]] = [distribution[j], distribution[i]];
+      }
+      for (let i = 0; i < distribution.length; i++) {
+        const styleIndex = distribution[i];
+        const { type } = styles[styleIndex];
+        const t = (i + .5) / distribution.length * .92;
+        const angle = i * 2.39996323 + rand(-.15, .15);
+        const tree = treePosition(t, angle, rand(.88, 1.08));
+        tree.y += rand(-.25, .25);
+        const size = type === "CANDY" ? rand(.55, .78) : rand(.37, .68);
+        const ornament = new Particle(type, tree, size, batches[styleIndex], slots[styleIndex]++);
+        if (type === "CANDY") {
+          ornament.treeRotation.setFromEuler(new THREE.Euler(.06, Math.PI / 2 - angle, rand(-.28, .28)));
+        }
+        particles.push(ornament);
+      }
+
+      function makeStar() {
+        const outline = new THREE.Shape();
+        for (let point = 0; point < 10; point++) {
+          const angle = Math.PI / 2 + point * Math.PI / 5;
+          const radius = point % 2 === 0 ? .92 : .36;
+          const x = Math.cos(angle) * radius;
+          const y = Math.sin(angle) * radius;
+          if (point === 0) outline.moveTo(x, y);
+          else outline.lineTo(x, y);
+        }
+        outline.closePath();
+        const geometry = new THREE.ExtrudeGeometry(outline, {
+          depth: .16, bevelEnabled: true, bevelSegments: 2, bevelSize: .085, bevelThickness: .07
+        });
+        geometry.center();
+        return new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+          color: 0xfceea7, metalness: .69, roughness: .28,
+          emissive: 0xffae4f, emissiveIntensity: .75
+        }));
+      }
+      const star = makeStar();
+      const starParticle = new Particle("STAR", new THREE.Vector3(0, 12.85, 0), 1, null, 0, star);
+      starParticle.treeRotation.identity();
+      mainGroup.add(star);
+      particles.push(starParticle);
+
+      const lightClouds = [];
+      const treeBlend = { scatter: 0, focus: 0, trim: 1 };
+      const pointTime = { value: 0 };
+      const pointPixelRatio = { value: 1 };
+      const backgroundExtent = { value: new THREE.Vector2() };
+      const rootTransform = { value: mainGroup.matrixWorld };
+      const starPosition = starParticle.position;
+      const groundHeight = TREE_BASE - .44;
+      const groundWave = `
+        float groundWave(float radius, float time) {
+          return sin(radius * 1.25 - time * 2.65);
+        }
+        float waveStrength(float radius) {
+          return smoothstep(0., 2., radius) * (1. - .7 * smoothstep(3., 20., radius));
+        }
+      `;
+      const ribbonFlow = `
+        float ribbonFlow(float progress, float time) {
+          return pow(.5 + .5 * cos(progress * 42. - time * 4.6), 5.);
+        }
+      `;
+      const ribbonTip = { value: new THREE.Vector3() };
+
+      function makeLightCloud(count, sample, effect, drawOnSmallScreen = count) {
+        const positions = new Float32Array(count * 3);
+        const styles = new Float32Array(count * 3);
+        const destinations = effect === "CROWN" ? new Float32Array(count * 3) : null;
+        for (let i = 0; i < count; i++) {
+          const { point, size, brightness, phase = rand(0, TAU) } = sample(i);
+          point.toArray(positions, i * 3);
+          styles.set([size, brightness, phase], i * 3);
+          if (destinations) randomShellPoint().toArray(destinations, i * 3);
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute("aStyle", new THREE.BufferAttribute(styles, 3));
+        if (destinations) {
+          geometry.setAttribute("aScatter", new THREE.BufferAttribute(destinations, 3));
+        }
+
+        const material = new THREE.ShaderMaterial({
+          defines: { [effect]: 1 },
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          uniforms: {
+            uTime: pointTime, uPixelRatio: pointPixelRatio, uBackgroundExtent: backgroundExtent,
+            uScatter: { value: 0 }, uFocus: { value: 0 }, uOpacity: { value: 1 },
+            uRootTransform: rootTransform, uGroundHeight: { value: groundHeight }, uRibbonTip: ribbonTip
+          },
+          vertexShader: `
+            uniform float uTime;
+            uniform float uPixelRatio;
+            uniform float uScatter;
+            uniform float uFocus;
+            uniform float uOpacity;
+            uniform vec2 uBackgroundExtent;
+            uniform mat4 uRootTransform;
+            uniform float uGroundHeight;
+            uniform vec3 uRibbonTip;
+            attribute vec3 aStyle;
+            #ifdef CROWN
+              attribute vec3 aScatter;
+            #endif
+            varying float vBrightness;
+            varying float vWarmth;
+            ${groundWave}
+            ${ribbonFlow}
+
+            void main() {
+              float phase = aStyle.z;
+              float speed = .55 + fract(phase * 2.79) * 1.45;
+              float pulse = sin(uTime * speed + phase);
+              float shimmer = .64 + .36 * pow(.5 + .5 * pulse, 2.);
+              float brightness = aStyle.y * uOpacity * shimmer;
+              vec3 p = position;
+
+              #ifdef CROWN
+                p = mix(p, aScatter, uScatter);
+                // Focus particles remain behind the camera-facing frame as the tree turns.
+                vec3 retreat = aScatter * 1.08;
+                p = mix(p, retreat, uFocus);
+                p.y += .085 * pulse;
+                brightness *= 1. - .49 * uFocus;
+              #elif defined(BACKGROUND)
+                p.xy *= uBackgroundExtent * (cameraPosition.z - p.z);
+                p.y += 2.;
+                float drift = mix(.24, 1.2, smoothstep(-56., 12., p.z));
+                p.xy += drift * vec2(sin(uTime * .17 * speed + phase),
+                                     cos(uTime * .24 * speed + phase));
+              #elif defined(RINGS)
+                float radius = length(p.xz);
+                float wave = groundWave(radius, uTime);
+                float strength = waveStrength(radius);
+                p.y += .65 * wave * strength;
+                brightness *= .68 + .42 * wave * strength;
+              #elif defined(ROOTS)
+                vec3 root = (uRootTransform * vec4(p, 1.)).xyz;
+                float radius = clamp(length(root.xz), 5.8, 9.35);
+                vec2 direction = normalize(root.xz + vec2(.0001, 0.));
+                vec3 ground = vec3(direction.x * radius, uGroundHeight, direction.y * radius);
+                float wave = groundWave(radius, uTime);
+                ground.y += .65 * wave * waveStrength(radius);
+                p = mix(ground, root, phase);
+                brightness *= mix(.65 + .22 * wave, 1., phase);
+              #elif defined(RIBBON)
+                p += uRibbonTip * smoothstep(.77, 1., phase);
+                brightness = aStyle.y * uOpacity * smoothstep(0., .035, phase)
+                  * (.34 + .66 * ribbonFlow(phase, uTime));
+              #endif
+
+              #ifdef RAYS
+                vec4 view = modelViewMatrix * vec4(0., 0., 0., 1.);
+                view.xy += p.xy * length(modelViewMatrix[0].xyz);
+                view.z += .25;
+              #else
+                vec4 view = modelViewMatrix * vec4(p, 1.);
+              #endif
+
+              #if defined(CROWN) || defined(RIBBON)
+                vec3 outward = normalize(vec3(position.x + .0001, .08, position.z));
+                vec3 normal = normalize(mat3(modelViewMatrix) * outward);
+                float facing = dot(normal, normalize(-view.xyz));
+                float facingLight = mix(.44, 1., smoothstep(-.65, .7, facing));
+                brightness *= mix(facingLight, 1., max(uScatter, uFocus));
+                vWarmth = smoothstep(-.68, .66, normal.x);
+              #else
+                vWarmth = .58 + .26 * sin(phase);
+              #endif
+
+              gl_Position = projectionMatrix * view;
+              gl_PointSize = clamp(aStyle.x * 51. / max(1., -view.z), 1., 6.) * uPixelRatio;
+              vBrightness = brightness;
+            }
+          `,
+          fragmentShader: `
+            varying float vBrightness;
+            varying float vWarmth;
+
+            void main() {
+              float r = distance(gl_PointCoord, vec2(.5));
+              float halo = 1. - smoothstep(.07, .49, r);
+              float core = 1. - smoothstep(.03, .24, r);
+              vec3 gold = mix(vec3(1., .82, .51), vec3(1., .59, .22), vWarmth);
+              gl_FragColor = vec4(gold + core * vec3(.49, .46, .37), halo * vBrightness);
+            }
+          `
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.frustumCulled = false;
+        lightClouds.push({ geometry, count, drawOnSmallScreen });
+        return points;
+      }
+
+      const backgroundStars = makeLightCloud(DUST_COUNT, () => {
+        const z = rand(-56, 10);
+        const near = (z + 56) / 66;
+        const bright = Math.random() < .075;
+        return {
+          point: new THREE.Vector3(rand(-1, 1), rand(-1, 1), z),
+          size: bright ? rand(2.7, 4.7) : rand(1.05, 2.35) * (.95 + near * .22),
+          brightness: bright ? rand(.62, .94) : rand(.19, .59)
+        };
+      }, "BACKGROUND");
+      scene.add(backgroundStars);
+
+      const crown = makeLightCloud(14500, () => {
+        const t = 1 - Math.sqrt(1 - Math.random());
+        const angle = rand(0, TAU);
+        const thickness = Math.random() < .78 ? rand(.88, 1.045) : rand(.18, .91);
+        const point = treePosition(t, angle, thickness);
+        point.y += rand(-.13, .13);
+        const bright = Math.random() < .07;
+        return {
+          point,
+          size: bright ? rand(2.35, 3.65) : rand(1.05, 2.05),
+          brightness: bright ? rand(.72, .97) : rand(.23, .66)
+        };
+      }, "CROWN", 10400);
+      mainGroup.add(crown);
+
+      function ribbonCenter(t) {
+        const point = treePosition(t, t * TAU * 5.65 + .53, 1.076);
+        point.y += .06 + .79 * THREE.MathUtils.smoothstep(t, .84, 1);
+        return point;
+      }
+
+      function ribbonWidth(t) {
+        return (.34 + .16 * (1 - t)) * (1 - THREE.MathUtils.smoothstep(t, .82, 1));
+      }
+
+      function makeRibbonSurface() {
+        const segments = 480;
+        const positions = [];
+        const uvs = [];
+        const indices = [];
+        for (let i = 0; i <= segments; i++) {
+          const t = i / segments;
+          const center = ribbonCenter(t);
+          const width = ribbonWidth(t);
+          for (const side of [-1, 1]) {
+            positions.push(center.x, center.y + side * width / 2, center.z);
+            uvs.push(t, (side + 1) / 2);
+          }
+          const left = 2 * i;
+          if (i < segments) indices.push(left, left + 1, left + 2, left + 1, left + 3, left + 2);
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+        geometry.setIndex(indices);
+        const material = new THREE.ShaderMaterial({
+          side: THREE.DoubleSide,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          uniforms: { uTime: pointTime, uRibbonTip: ribbonTip, uOpacity: { value: 1 } },
+          vertexShader: `
+            uniform float uTime;
+            uniform vec3 uRibbonTip;
+            varying vec2 vRibbon;
+            void main() {
+              vRibbon = uv;
+              vec3 p = position + uRibbonTip * smoothstep(.77, 1., uv.x);
+              p.y += (uv.y - .5) * .11 * sin(uTime * 1.7 - uv.x * 31.)
+                * (1. - smoothstep(.82, 1., uv.x));
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.);
+            }
+          `,
+          fragmentShader: `
+            uniform float uTime;
+            uniform float uOpacity;
+            varying vec2 vRibbon;
+            ${ribbonFlow}
+            void main() {
+              float edge = abs(2. * vRibbon.y - 1.);
+              float veil = 1. - smoothstep(.22, 1., edge);
+              float hem = smoothstep(.56, .87, edge) * (1. - smoothstep(.91, 1., edge));
+              float crest = ribbonFlow(vRibbon.x, uTime);
+              vec3 color = mix(vec3(1., .61, .24), vec3(1.22, 1.05, .73), .27 + .53 * crest + .2 * hem);
+              float opacity = (.21 * veil + .16 * hem) * (.72 + .38 * crest)
+                * smoothstep(0., .036, vRibbon.x) * uOpacity;
+              gl_FragColor = vec4(color, opacity);
+            }
+          `
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.frustumCulled = false;
+        return mesh;
+      }
+
+      const ribbonSurface = makeRibbonSurface();
+      const ribbonSparks = makeLightCloud(2300, (i) => {
+        // Interleave samples along the helix to keep every turn at lower density.
+        const t = ((i + .5) * .61803398875) % 1;
+        const point = ribbonCenter(t);
+        point.y += rand(-.54, .54) * ribbonWidth(t);
+        return { point, size: rand(1.3, 2.65), brightness: rand(.36, .88), phase: t };
+      }, "RIBBON", 1600);
+      const ribbonRestTip = ribbonCenter(1);
+      mainGroup.add(ribbonSurface, ribbonSparks);
+
+      const groundRings = makeLightCloud(9700, (i) => {
+        const ring = i % 3;
+        const radius = [8.8, 13.1, 18.1][ring];
+        const angle = rand(0, TAU);
+        const filler = i % 5 === 0;
+        const distance = filler ? 20 * Math.sqrt(Math.random())
+          : radius + rand(-.68, .68) + rand(-.49, .49) * (ring + 1);
+        return {
+          point: new THREE.Vector3(Math.cos(angle) * distance, groundHeight + rand(-.12, .12),
+            Math.sin(angle) * distance),
+          size: rand(.9, 1.95),
+          brightness: rand(.26, .78) * (filler ? .45 : 1 - ring * .14)
+        };
+      }, "RINGS", 6900);
+      scene.add(groundRings);
+
+      const roots = makeLightCloud(3900, () => {
+        const angle = rand(0, TAU);
+        const t = rand(.002, .085);
+        return {
+          point: treePosition(t, angle, rand(.74, 1.07)),
+          size: rand(1.08, 2.25),
+          brightness: rand(.27, .72),
+          phase: Math.random()
+        };
+      }, "ROOTS", 2800);
+      scene.add(roots);
+
+      const starRays = makeLightCloud(530, (i) => {
+        const ray = i % 11;
+        const angle = ray * TAU / 11 + .13;
+        const length = ray % 3 === 0 ? 2.03 : 1.43;
+        const distance = .23 + Math.random() * length;
+        const offset = rand(-.035, .035);
+        return {
+          point: new THREE.Vector3(Math.cos(angle) * distance - Math.sin(angle) * offset,
+            Math.sin(angle) * distance + Math.cos(angle) * offset, 0),
+          size: rand(1.25, 2.45),
+          brightness: rand(.36, .82) * (1 - .55 * distance / length)
+        };
+      }, "RAYS");
+      star.add(starRays);
+
+      function makeDefaultPhoto() {
+        const canvas = document.createElement("canvas");
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext("2d");
+        const paper = ctx.createRadialGradient(320, 205, 5, 320, 240, 360);
+        paper.addColorStop(0, "#e6d1a4");
+        paper.addColorStop(1, "#cda462");
+        ctx.fillStyle = paper;
+        ctx.fillRect(0, 0, 640, 480);
+        ctx.strokeStyle = "#81542a";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(25, 25, 590, 430);
+        ctx.strokeRect(34, 34, 572, 412);
+        ctx.fillStyle = "#8d272a";
+        ctx.textAlign = "center";
+        ctx.font = '70px "Times New Roman", serif';
+        ctx.fillText("JOYEUX NOEL", 320, 264);
+        ctx.fillStyle = "#85561e";
+        ctx.font = '34px "Times New Roman", serif';
+        ctx.fillText("✧   ✦   ✧", 320, 173);
+        ctx.fillText("✦", 320, 342);
+        return canvasTexture(canvas);
+      }
+
+      const frameMaterial = new THREE.MeshStandardMaterial({
+        color: 0xd4af37, metalness: .76, roughness: .28
+      });
+      const frameBox = new THREE.BoxGeometry(1, 1, 1);
+
+      function addPhotoToScene(texture) {
+        const { width, height } = texture.image;
+        const aspect = width / height;
+        const photoWidth = 1.65 * Math.min(1, aspect);
+        const photoHeight = 1.65 * Math.min(1, 1 / aspect);
+        const group = new THREE.Group();
+        const image = new THREE.Mesh(
+          new THREE.PlaneGeometry(photoWidth, photoHeight),
+          new THREE.MeshBasicMaterial({ map: texture, toneMapped: false })
+        );
+        image.position.z = .086;
+        group.add(image);
+
+        const backing = new THREE.Mesh(frameBox, frameMaterial);
+        backing.scale.set(photoWidth + .11, photoHeight + .11, .12);
+        group.add(backing);
+        for (const side of [-1, 1]) {
+          const horizontal = new THREE.Mesh(frameBox, frameMaterial);
+          horizontal.scale.set(photoWidth + .16, .08, .15);
+          horizontal.position.set(0, side * (photoHeight / 2 + .04), .042);
+          const vertical = new THREE.Mesh(frameBox, frameMaterial);
+          vertical.scale.set(.08, photoHeight, .15);
+          vertical.position.set(side * (photoWidth / 2 + .04), 0, .042);
+          group.add(horizontal, vertical);
+        }
+
+        const slot = photos.length;
+        const t = slot === 0 ? .38 : .17 + ((slot * .61803398875) % 1) * .58;
+        const angle = slot === 0 ? Math.PI / 2 : Math.PI / 2 + slot * 2.39996323;
+        const particle = new Particle(
+          "PHOTO", treePosition(t, angle, 1.13), 1.02, null, 0, group
+        );
+        particle.treeRotation.setFromEuler(new THREE.Euler(-.06, Math.PI / 2 - angle, rand(-.13, .13)));
+        particle.targetRotation.copy(particle.treeRotation);
+        particle.rotation.copy(particle.treeRotation);
+        particle.writeTransform();
+        photos.push(particle);
+        particles.push(particle);
+        mainGroup.add(group);
+        return particle;
+      }
+      addPhotoToScene(makeDefaultPhoto());
+
+      function setStatus(message = "") {
+        status.textContent = message;
+        status.hidden = !message;
+      }
+
+      function movePhotoTo(particle, parent) {
+        parent.attach(particle.object);
+        particle.position.copy(particle.object.position);
+        particle.rotation.copy(particle.object.quaternion);
+        particle.scale = particle.object.scale.x;
+      }
+
+      function setMode(mode) {
+        if (STATE.mode === MODES.FOCUS) movePhotoTo(STATE.focus, mainGroup);
+        if (mode === MODES.FOCUS) {
+          const candidates = photos.filter(particle =>
+            particle.type === "PHOTO" && (photos.length === 1 || particle !== STATE.focus)
+          );
+          STATE.focus = candidates[Math.floor(Math.random() * candidates.length)];
+          movePhotoTo(STATE.focus, scene);
+        }
+        STATE.mode = mode;
+        for (const button of modeButtons) {
+          button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+        }
+      }
+
+      const photoInput = document.querySelector("#photo-input");
+      const uploadButton = document.querySelector("#upload-button");
+      const uploadTicket = document.querySelector('meta[name="upload-ticket"]').content;
+      uploadButton.addEventListener("click", () => photoInput.click());
+
+      async function preparePhoto(file) {
+        if (file.size > 20 * 1024 * 1024 || !/^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
+          throw new Error("请选择不超过 20 MB 的 JPG、PNG、WebP 或 GIF。");
+        }
+        const url = URL.createObjectURL(file);
+        try {
+          const image = new Image();
+          image.src = url;
+          await image.decode();
+          const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#f8f5ed";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          const jpeg = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", .84));
+          if (!jpeg) throw new Error("无法处理此照片。");
+          return { jpeg, canvas };
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      }
+
+      photoInput.addEventListener("change", async () => {
+        const files = [...photoInput.files];
+        photoInput.value = "";
+        if (!files.length) return;
+        if (files.length > 6) {
+          setStatus("每次最多选择 6 张照片。");
+          return;
+        }
+        uploadButton.disabled = true;
+        setStatus("正在发送照片…");
+        let sent = 0;
+        let failure = "";
+        try {
+          for (const file of files) {
+            try {
+              const { jpeg, canvas } = await preparePhoto(file);
+              const response = await fetch("/api/photos", {
+                method: "POST",
+                headers: { "Content-Type": "image/jpeg", "X-Upload-Ticket": uploadTicket },
+                body: jpeg
+              });
+              const receipt = await response.json().catch(() => null);
+              if (!response.ok || !receipt?.saved) {
+                throw new Error(receipt?.error ?? "发送失败，请稍后重试。");
+              }
+              sent++;
+              addPhotoToScene(canvasTexture(canvas));
+            } catch (error) {
+              failure = error.message || "发送失败，请稍后重试。";
+            }
+          }
+          setStatus(failure ? (sent ? `已发送 ${sent}/${files.length} 张。${failure}` : failure)
+            : `已发送 ${sent} 张照片，并挂到树上。`);
+        } finally {
+          uploadButton.disabled = false;
+        }
+      });
+
+      for (const button of modeButtons) {
+        button.addEventListener("click", () => setMode(button.dataset.mode));
+      }
+      const keyboardModes = { "1": MODES.TREE, "2": MODES.SCATTER, "3": MODES.FOCUS };
+      window.addEventListener("keydown", (event) => {
+        if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+        if (event.key.toLowerCase() === "h") {
+          controls.inert = controls.classList.toggle("ui-hidden");
+        } else if (Object.hasOwn(keyboardModes, event.key)) {
+          setMode(keyboardModes[event.key]);
+        }
+      });
+
+      let handLandmarker = null;
+      let stream = null;
+      let previousVideoTime = -1;
+      let previousInference = -Infinity;
+      const gestureTransition = { candidate: null, latched: null, releasedSince: null, lastSeen: null };
+      const handZoom = {
+        distance: DEFAULT_CAMERA_DISTANCE, anchorDistance: DEFAULT_CAMERA_DISTANCE,
+        reference: null, filtered: null, samples: [], lastSample: null
+      };
+
+      async function loadHandLandmarker() {
+        const { FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision");
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+        );
+        return await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            delegate: "GPU"
+          },
+          runningMode: "VIDEO",
+          numHands: 1,
+          minHandDetectionConfidence: .6,
+          minHandPresenceConfidence: .6,
+          minTrackingConfidence: .55
+        });
+      }
+
+      function stopCamera() {
+        stream?.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+        stream = null;
+        STATE.gesture.detected = false;
+        STATE.gesture.name = null;
+        Object.assign(gestureTransition, { candidate: null, latched: null, releasedSince: null, lastSeen: null });
+        resetHandZoom();
+        cameraButton.textContent = "Enable camera";
+        cameraButton.setAttribute("aria-pressed", "false");
+      }
+
+      async function toggleCamera() {
+        if (stream) {
+          stopCamera();
+          setStatus();
+          return;
+        }
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setStatus("Camera access needs HTTPS or localhost.");
+          return;
+        }
+
+        cameraButton.disabled = true;
+        cameraButton.textContent = "Starting camera…";
+        setStatus();
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }
+          });
+          video.srcObject = stream;
+          await video.play();
+          handLandmarker ??= await loadHandLandmarker();
+          previousVideoTime = -1;
+          cameraButton.textContent = "Disable camera";
+          cameraButton.setAttribute("aria-pressed", "true");
+        } catch (error) {
+          stopCamera();
+          setStatus(error.name === "NotAllowedError"
+            ? "Allow camera access to use hand gestures."
+            : "Hand tracking is unavailable. Use the mode buttons.");
+          console.warn("Camera initialization failed", error);
+        } finally {
+          cameraButton.disabled = false;
+        }
+      }
+
+      cameraButton.addEventListener("click", toggleCamera);
+      window.addEventListener("pagehide", stopCamera);
+
+      const fingerBases = [5, 9, 13, 17];
+      const handVector = (a, b) => new THREE.Vector3(a.x - b.x, a.y - b.y, a.z - b.z);
+
+      function classifyHand(world) {
+        if (world?.length !== 21 ||
+            !world.every(point => [point?.x, point?.y, point?.z].every(Number.isFinite))) return undefined;
+        const palmWidth = handVector(world[5], world[17]).length();
+        const palmDirection = handVector(world[9], world[0]);
+        if (palmWidth < 1e-4 || palmDirection.length() < .25 * palmWidth) return undefined;
+        palmDirection.normalize();
+
+        const fingers = fingerBases.map(base => {
+          const [mcp, pip, dip, tip] = world.slice(base, base + 4);
+          const proximal = handVector(pip, mcp);
+          const middle = handVector(dip, pip);
+          const distal = handVector(tip, dip);
+          const lengths = [proximal.length(), middle.length(), distal.length()];
+          if (lengths.some(length => length < .045 * palmWidth)) return null;
+          const pipBend = proximal.angleTo(middle);
+          const dipBend = middle.angleTo(distal);
+          const bend = pipBend + dipBend;
+          // Normalize by each finger's own bone length so short fingers can still be fully open.
+          const boneLength = lengths[0] + lengths[1] + lengths[2];
+          const tipOffset = handVector(tip, mcp);
+          const reach = tipOffset.length() / boneLength;
+          const tipForward = tipOffset.dot(palmDirection) / boneLength;
+          const forward = proximal.dot(palmDirection) / lengths[0];
+          return {
+            folded: reach < .82 && bend > .67 && tipForward < .54,
+            firmlyFolded: reach < .73 && bend > 1.05 && tipForward < .40,
+            straight: reach > .84 && pipBend < .77 && dipBend < .85 && forward > .28,
+            firmlyStraight: reach > .92 && pipBend < .53 && dipBend < .6 && forward > .49
+          };
+        });
+        if (fingers.some(finger => !finger)) return undefined;
+
+        if (fingers.every(finger => finger.folded)) {
+          const count = fingers.filter(finger => finger.firmlyFolded).length;
+          return count >= 2 ? { mode: MODES.TREE, strong: count >= 3 } : null;
+        }
+        const pinchDistance = handVector(world[4], world[8]).length() / palmWidth;
+        if (pinchDistance < .31 && !fingers[0].folded && fingers.slice(1).some(finger => finger.straight)) {
+          return { mode: MODES.FOCUS, strong: true };
+        }
+        if (pinchDistance > .4 && fingers.every(finger => finger.straight)) {
+          const count = fingers.filter(finger => finger.firmlyStraight).length;
+          return count >= 2 ? { mode: MODES.SCATTER, strong: count >= 3 && pinchDistance > .48 } : null;
+        }
+        return null;
+      }
+
+      function updateGestureTransition(pose, now, frameGap) {
+        const state = gestureTransition;
+        const absence = state.lastSeen === null ? 0 : now - state.lastSeen;
+        if (absence >= 400) {
+          state.latched = null;
+          state.releasedSince = null;
+        }
+        if (pose === undefined || frameGap > 140) {
+          state.candidate = null;
+          state.releasedSince = null;
+          if (pose === undefined) return null;
+        }
+        state.lastSeen = now;
+        const mode = pose?.mode;
+        if (state.latched && mode !== state.latched) {
+          state.releasedSince ??= now;
+          if (now - state.releasedSince >= 125) state.latched = null;
+        } else {
+          state.releasedSince = null;
+        }
+
+        // A borderline frame can sustain a pose briefly, but cannot start or confirm it.
+        if (!mode || mode !== state.candidate?.mode || now - state.candidate.lastStrong > 100) {
+          state.candidate = pose?.strong ? { mode, since: now, lastStrong: now, frames: 0 } : null;
+        }
+        const candidate = state.candidate;
+        if (!candidate || !pose.strong) return null;
+        candidate.frames++;
+        candidate.lastStrong = now;
+        const confirmationMs = mode === MODES.FOCUS ? 125 : 170;
+        if (mode === state.latched || candidate.frames < 4 || now - candidate.since < confirmationMs) return null;
+        state.latched = mode;
+        state.releasedSince = null;
+        return mode;
+      }
+
+      function measurePalm(landmarks, world) {
+        const palmIndices = [0, 5, 9, 13, 17];
+        if (!palmIndices.every(index => {
+          const image = landmarks?.[index];
+          const point = world?.[index];
+          return image && point && [image.x, image.y, point.x, point.y, point.z].every(Number.isFinite)
+            && image.x > .025 && image.x < .975 && image.y > .025 && image.y < .975;
+        })) return null;
+
+        const across = handVector(world[17], world[5]);
+        const along = handVector(world[9], world[0]);
+        const normal = across.cross(along);
+        const facing = Math.abs(normal.z) / normal.length();
+        if (!(facing > .58)) return null;
+
+        const spans = [[0, 5], [0, 9], [0, 13], [0, 17], [5, 17]].map(([a, b]) =>
+          Math.hypot((landmarks[a].x - landmarks[b].x) * visionFrame.width,
+            (landmarks[a].y - landmarks[b].y) * visionFrame.height)
+        ).sort((a, b) => a - b);
+        return spans[2] >= 7 ? { span: spans[2], facing } : null;
+      }
+
+      function resetHandZoom() {
+        handZoom.reference = null;
+        handZoom.filtered = null;
+        handZoom.samples.length = 0;
+        handZoom.lastSample = null;
+      }
+
+      function updateHandZoom(sample, now) {
+        if (!sample) {
+          if (handZoom.lastSample !== null && now - handZoom.lastSample > 230) resetHandZoom();
+          return;
+        }
+        const stale = handZoom.lastSample !== null && now - handZoom.lastSample > 230;
+        if (stale) resetHandZoom();
+        if (handZoom.reference && Math.abs(handZoom.reference.facing - sample.facing) > .18) return;
+        handZoom.lastSample = now;
+
+        if (!handZoom.reference) {
+          const samples = handZoom.samples;
+          samples.push(sample);
+          if (samples.length < 5) return;
+          const sorted = samples.map(point => point.span).sort((a, b) => a - b);
+          const angles = samples.map(point => point.facing);
+          if (sorted[4] / sorted[0] > 1.13 || Math.max(...angles) - Math.min(...angles) > .13) {
+            samples.shift();
+            return;
+          }
+          handZoom.reference = { span: sorted[2], facing: angles.reduce((sum, angle) => sum + angle, 0) / 5 };
+          handZoom.filtered = sorted[2];
+          handZoom.anchorDistance = handZoom.distance;
+          return;
+        }
+
+        const reference = handZoom.reference;
+        handZoom.filtered = THREE.MathUtils.lerp(handZoom.filtered, sample.span, .24);
+        const offset = Math.log(handZoom.filtered / reference.span);
+        const travel = Math.sign(offset) * Math.max(0, Math.abs(offset) - .045);
+        handZoom.distance = THREE.MathUtils.clamp(handZoom.anchorDistance - 34 * travel, 44.5, 64);
+      }
+
+      function processGestures(result, now, frameGap) {
+        const landmarks = result.landmarks[0];
+        const world = result.worldLandmarks?.[0];
+        const palm = landmarks?.[9];
+        const visible = Boolean(palm && Number.isFinite(palm.x) && Number.isFinite(palm.y));
+        const pose = visible ? classifyHand(world) : undefined;
+        const state = STATE.gesture;
+        if (visible) {
+          state.x = palm.x;
+          state.y = palm.y;
+        }
+        state.detected = visible;
+        const trackable = pose !== undefined;
+        const confirmed = updateGestureTransition(pose, now, frameGap);
+        state.name = trackable ? gestureTransition.latched : null;
+        if (confirmed && (confirmed !== STATE.mode || confirmed === MODES.FOCUS)) setMode(confirmed);
+        if (STATE.mode === MODES.FOCUS || view.pointer) {
+          resetHandZoom();
+        } else {
+          updateHandZoom(trackable ? measurePalm(landmarks, world) : null, now);
+        }
+      }
+
+      function detectHand(now) {
+        if (!stream || !handLandmarker || video.readyState < 2 ||
+            now - previousInference < 42 || video.currentTime === previousVideoTime) return;
+        const frameGap = now - previousInference;
+        previousInference = now;
+        previousVideoTime = video.currentTime;
+
+        try {
+          const aspect = visionFrame.width / visionFrame.height;
+          const cropWidth = Math.min(video.videoWidth, video.videoHeight * aspect);
+          const cropHeight = cropWidth / aspect;
+          visionContext.drawImage(video,
+            (video.videoWidth - cropWidth) / 2, (video.videoHeight - cropHeight) / 2,
+            cropWidth, cropHeight, 0, 0, visionFrame.width, visionFrame.height
+          );
+          const result = handLandmarker.detectForVideo(visionFrame, now);
+          processGestures(result, now, frameGap);
+        } catch (error) {
+          stopCamera();
+          handLandmarker.close();
+          handLandmarker = null;
+          setStatus("Hand tracking stopped. You can enable the camera again.");
+          console.warn("Hand inference failed", error);
+        }
+      }
+
+      function framingFov() {
+        const focus = STATE.mode === MODES.FOCUS;
+        const vertical = focus ? .44 : Math.tan(THREE.MathUtils.degToRad(20));
+        const horizontal = focus ? .32 : .255;
+        return THREE.MathUtils.radToDeg(2 * Math.atan(Math.max(vertical, horizontal / camera.aspect)));
+      }
+
+      function updateProjection() {
+        camera.updateProjectionMatrix();
+        // Overscan leaves room for stars to drift at the edges on every screen.
+        const vertical = 1.28 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+        backgroundExtent.value.set(vertical * camera.aspect, vertical);
+      }
+
+      const view = { yaw: .24, pitch: 0, pointer: null, handAnchor: null, resumeAt: 0 };
+      const limitPitch = value => THREE.MathUtils.clamp(value, -.32, .32);
+
+      stage.addEventListener("pointerdown", event => {
+        if (!event.isPrimary || event.button !== 0 || view.pointer) return;
+        stage.setPointerCapture(event.pointerId);
+        view.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+        view.handAnchor = null;
+        stage.classList.add("dragging");
+      });
+
+      stage.addEventListener("pointermove", event => {
+        const pointer = view.pointer;
+        if (pointer?.id !== event.pointerId) return;
+        view.yaw += (event.clientX - pointer.x) * TAU / Math.max(420, stage.clientWidth * .73);
+        view.pitch = limitPitch(view.pitch + (event.clientY - pointer.y) * .004);
+        pointer.x = event.clientX;
+        pointer.y = event.clientY;
+      });
+
+      function finishDrag(event) {
+        if (view.pointer?.id !== event.pointerId) return;
+        view.pointer = null;
+        view.resumeAt = performance.now() + 2000;
+        stage.classList.remove("dragging");
+      }
+      for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+        stage.addEventListener(type, finishDrag);
+      }
+
+      function updateView(now, motionDelta, blend) {
+        const gesture = STATE.gesture;
+        if (!view.pointer && gesture.detected) {
+          view.handAnchor ??= { x: gesture.x, y: gesture.y, yaw: view.yaw, pitch: view.pitch };
+          const anchor = view.handAnchor;
+          view.yaw = anchor.yaw + (anchor.x - gesture.x) * 3.05;
+          view.pitch = limitPitch(anchor.pitch + (gesture.y - anchor.y) * .92);
+        } else {
+          view.handAnchor = null;
+          if (!view.pointer && now >= view.resumeAt) view.yaw += motionDelta * .14;
+        }
+
+        mainGroup.rotation.x = THREE.MathUtils.lerp(mainGroup.rotation.x, view.pitch, blend);
+        mainGroup.rotation.y = THREE.MathUtils.lerp(mainGroup.rotation.y, view.yaw, blend);
+      }
+
+      function updateLightClouds(blend, elapsed) {
+        const scatter = STATE.mode === MODES.SCATTER;
+        const focus = STATE.mode === MODES.FOCUS;
+        treeBlend.scatter = THREE.MathUtils.lerp(treeBlend.scatter, Number(scatter), blend);
+        treeBlend.focus = THREE.MathUtils.lerp(treeBlend.focus, Number(focus), blend);
+        treeBlend.trim = THREE.MathUtils.lerp(treeBlend.trim, Number(!scatter && !focus), blend);
+        crown.material.uniforms.uScatter.value = treeBlend.scatter;
+        crown.material.uniforms.uFocus.value = treeBlend.focus;
+        ribbonTip.value.copy(starPosition).sub(ribbonRestTip);
+        mainGroup.updateWorldMatrix(true, false);
+        for (const trim of [ribbonSurface, ribbonSparks, groundRings, roots, starRays]) {
+          trim.material.uniforms.uOpacity.value = treeBlend.trim;
+          trim.visible = treeBlend.trim > .004;
+        }
+        pointTime.value = elapsed;
+      }
+
+      function resize() {
+        const width = Math.max(1, innerWidth);
+        const height = Math.max(1, innerHeight);
+        const pixelRatio = Math.min(devicePixelRatio || 1, 1.75);
+        camera.aspect = width / height;
+        camera.fov = framingFov();
+        updateProjection();
+        renderer.setPixelRatio(pixelRatio);
+        renderer.setSize(width, height);
+        composer.setPixelRatio(pixelRatio);
+        composer.setSize(width, height);
+        pointPixelRatio.value = pixelRatio * THREE.MathUtils.clamp(height / 720, .75, 1.25);
+        for (const { geometry, count, drawOnSmallScreen } of lightClouds) {
+          geometry.setDrawRange(0, width <= 600 ? drawOnSmallScreen : count);
+        }
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      let previousFrame = performance.now();
+      let elapsed = 0;
+      function animate(now) {
+        const delta = Math.min(Math.max((now - previousFrame) / 1000, 0), .05);
+        previousFrame = now;
+        const motionDelta = reducedMotion.matches ? 0 : delta;
+        elapsed += motionDelta;
+        detectHand(now);
+
+        const blend = 1 - Math.exp(-5 * delta);
+        const cameraDistance = STATE.mode === MODES.FOCUS ? DEFAULT_CAMERA_DISTANCE : handZoom.distance;
+        camera.position.z = THREE.MathUtils.lerp(camera.position.z, cameraDistance, blend);
+        const fov = framingFov();
+        if (Math.abs(fov - camera.fov) > .001) {
+          camera.fov = THREE.MathUtils.lerp(camera.fov, fov, blend);
+          updateProjection();
+        }
+        updateView(now, motionDelta, 1 - Math.exp(-(view.pointer ? 16 : 7) * delta));
+
+        for (const particle of particles) particle.update(motionDelta, blend, elapsed);
+        for (const batch of batches) batch.instanceMatrix.needsUpdate = true;
+        updateLightClouds(blend, elapsed);
+        composer.render();
+        requestAnimationFrame(animate);
+      }
+
+      animate(previousFrame);
+      loader.classList.add("loaded");
+    }
+
+    init().catch((error) => {
+      loader.querySelector(".spinner").hidden = true;
+      document.querySelector("#loader-message").textContent =
+        "The scene could not load. Check your connection and WebGL support, then reload.";
+      console.error("Christmas tree initialization failed", error);
+    });
+  </script>
+</body>
+</html>
