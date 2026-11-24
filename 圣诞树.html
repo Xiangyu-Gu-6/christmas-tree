@@ -923,7 +923,7 @@
       let stream = null;
       let previousVideoTime = -1;
       let previousInference = -Infinity;
-      const gestureTransition = { candidate: null, since: 0, latched: null, releasedSince: null };
+      const gestureTransition = { candidate: null, latched: null, releasedSince: null, lastSeen: null };
       const handZoom = {
         distance: DEFAULT_CAMERA_DISTANCE, anchorDistance: DEFAULT_CAMERA_DISTANCE,
         reference: null, filtered: null, samples: [], lastSample: null
@@ -940,7 +940,10 @@
             delegate: "GPU"
           },
           runningMode: "VIDEO",
-          numHands: 1
+          numHands: 1,
+          minHandDetectionConfidence: .6,
+          minHandPresenceConfidence: .6,
+          minTrackingConfidence: .55
         });
       }
 
@@ -950,7 +953,7 @@
         stream = null;
         STATE.gesture.detected = false;
         STATE.gesture.name = null;
-        Object.assign(gestureTransition, { candidate: null, latched: null, releasedSince: null });
+        Object.assign(gestureTransition, { candidate: null, latched: null, releasedSince: null, lastSeen: null });
         resetHandZoom();
         cameraButton.textContent = "Enable camera";
         cameraButton.setAttribute("aria-pressed", "false");
@@ -998,70 +1001,88 @@
       const fingerBases = [5, 9, 13, 17];
       const handVector = (a, b) => new THREE.Vector3(a.x - b.x, a.y - b.y, a.z - b.z);
 
-      function flexion(a, joint, b) {
-        const proximal = handVector(joint, a);
-        const distal = handVector(b, joint);
-        if (proximal.lengthSq() < 1e-10 || distal.lengthSq() < 1e-10) return NaN;
-        return proximal.angleTo(distal);
-      }
-
       function classifyHand(world) {
         if (world?.length !== 21 ||
             !world.every(point => [point?.x, point?.y, point?.z].every(Number.isFinite))) return undefined;
         const palmWidth = handVector(world[5], world[17]).length();
-        if (palmWidth < 1e-4) return undefined;
-        const palm = new THREE.Vector3(world[0].x, world[0].y, world[0].z);
-        for (const base of fingerBases) {
-          const { x, y, z } = world[base];
-          palm.x += x;
-          palm.y += y;
-          palm.z += z;
-        }
-        palm.multiplyScalar(.2);
+        const palmDirection = handVector(world[9], world[0]);
+        if (palmWidth < 1e-4 || palmDirection.length() < .25 * palmWidth) return undefined;
+        palmDirection.normalize();
 
         const fingers = fingerBases.map(base => {
           const [mcp, pip, dip, tip] = world.slice(base, base + 4);
-          const pipBend = flexion(mcp, pip, dip);
-          const dipBend = flexion(pip, dip, tip);
-          const tipToPalm = handVector(tip, palm).length() / palmWidth;
-          const contracted = handVector(tip, mcp).length() < handVector(pip, mcp).length() + .24 * palmWidth;
+          const proximal = handVector(pip, mcp);
+          const middle = handVector(dip, pip);
+          const distal = handVector(tip, dip);
+          const lengths = [proximal.length(), middle.length(), distal.length()];
+          if (lengths.some(length => length < .045 * palmWidth)) return null;
+          const pipBend = proximal.angleTo(middle);
+          const dipBend = middle.angleTo(distal);
+          const bend = pipBend + dipBend;
+          // Normalize by each finger's own bone length so short fingers can still be fully open.
+          const boneLength = lengths[0] + lengths[1] + lengths[2];
+          const tipOffset = handVector(tip, mcp);
+          const reach = tipOffset.length() / boneLength;
+          const tipForward = tipOffset.dot(palmDirection) / boneLength;
+          const forward = proximal.dot(palmDirection) / lengths[0];
           return {
-            curled: pipBend > .59 && tipToPalm < 1.12 && contracted,
-            extended: pipBend < .43 && dipBend < .55 && tipToPalm > 1.02
+            folded: reach < .82 && bend > .67 && tipForward < .54,
+            firmlyFolded: reach < .73 && bend > 1.05 && tipForward < .40,
+            straight: reach > .84 && pipBend < .77 && dipBend < .85 && forward > .28,
+            firmlyStraight: reach > .92 && pipBend < .53 && dipBend < .6 && forward > .49
           };
         });
+        if (fingers.some(finger => !finger)) return undefined;
 
-        if (fingers.every(finger => finger.curled)) return MODES.TREE;
-        const pinchDistance = handVector(world[4], world[8]).length() / palmWidth;
-        if (pinchDistance < .31 && !fingers[0].curled && fingers.slice(1).some(finger => finger.extended)) {
-          return MODES.FOCUS;
+        if (fingers.every(finger => finger.folded)) {
+          const count = fingers.filter(finger => finger.firmlyFolded).length;
+          return count >= 2 ? { mode: MODES.TREE, strong: count >= 3 } : null;
         }
-        if (fingers.every(finger => finger.extended) && pinchDistance > .48) return MODES.SCATTER;
+        const pinchDistance = handVector(world[4], world[8]).length() / palmWidth;
+        if (pinchDistance < .31 && !fingers[0].folded && fingers.slice(1).some(finger => finger.straight)) {
+          return { mode: MODES.FOCUS, strong: true };
+        }
+        if (pinchDistance > .4 && fingers.every(finger => finger.straight)) {
+          const count = fingers.filter(finger => finger.firmlyStraight).length;
+          return count >= 2 ? { mode: MODES.SCATTER, strong: count >= 3 && pinchDistance > .48 } : null;
+        }
         return null;
       }
 
-      function updateGestureTransition(gesture, handVisible, now, frameGap) {
+      function updateGestureTransition(pose, now, frameGap) {
         const state = gestureTransition;
-        if (!handVisible || frameGap > 140) {
+        const absence = state.lastSeen === null ? 0 : now - state.lastSeen;
+        if (absence >= 400) {
+          state.latched = null;
+          state.releasedSince = null;
+        }
+        if (pose === undefined || frameGap > 140) {
           state.candidate = null;
           state.releasedSince = null;
-          if (!handVisible) return null;
+          if (pose === undefined) return null;
         }
-        if (state.latched && gesture !== state.latched) {
+        state.lastSeen = now;
+        const mode = pose?.mode;
+        if (state.latched && mode !== state.latched) {
           state.releasedSince ??= now;
           if (now - state.releasedSince >= 125) state.latched = null;
         } else {
           state.releasedSince = null;
         }
-        if (gesture !== state.candidate) {
-          state.candidate = gesture;
-          state.since = now;
+
+        // A borderline frame can sustain a pose briefly, but cannot start or confirm it.
+        if (!mode || mode !== state.candidate?.mode || now - state.candidate.lastStrong > 100) {
+          state.candidate = pose?.strong ? { mode, since: now, lastStrong: now, frames: 0 } : null;
         }
-        const confirmationMs = gesture === MODES.TREE ? 170 : 125;
-        if (!gesture || gesture === state.latched || now - state.since < confirmationMs) return null;
-        state.latched = gesture;
+        const candidate = state.candidate;
+        if (!candidate || !pose.strong) return null;
+        candidate.frames++;
+        candidate.lastStrong = now;
+        const confirmationMs = mode === MODES.FOCUS ? 125 : 170;
+        if (mode === state.latched || candidate.frames < 4 || now - candidate.since < confirmationMs) return null;
+        state.latched = mode;
         state.releasedSince = null;
-        return gesture;
+        return mode;
       }
 
       function measurePalm(landmarks, world) {
@@ -1131,15 +1152,15 @@
         const world = result.worldLandmarks?.[0];
         const palm = landmarks?.[9];
         const visible = Boolean(palm && Number.isFinite(palm.x) && Number.isFinite(palm.y));
-        const gesture = visible ? classifyHand(world) : null;
+        const pose = visible ? classifyHand(world) : undefined;
         const state = STATE.gesture;
         if (visible) {
           state.x = palm.x;
           state.y = palm.y;
         }
         state.detected = visible;
-        const trackable = visible && gesture !== undefined;
-        const confirmed = updateGestureTransition(gesture, trackable, now, frameGap);
+        const trackable = pose !== undefined;
+        const confirmed = updateGestureTransition(pose, now, frameGap);
         state.name = trackable ? gestureTransition.latched : null;
         if (confirmed && (confirmed !== STATE.mode || confirmed === MODES.FOCUS)) setMode(confirmed);
         if (STATE.mode === MODES.FOCUS || view.pointer) {
